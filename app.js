@@ -42,6 +42,7 @@
     btnCloudModal: document.getElementById('btn-cloud-modal'),
     cloudStatusDot: document.getElementById('cloud-status-dot'),
     cloudStatusText: document.getElementById('cloud-status-text'),
+    btnPitchModal: document.getElementById('btn-pitch-modal'),
   };
 
   const landing = {
@@ -96,6 +97,9 @@
     btnSaveCloud: document.getElementById('btn-save-cloud'),
     btnClearCloud: document.getElementById('btn-clear-cloud'),
     btnCopySql: document.getElementById('btn-copy-sql'),
+
+    pitch: document.getElementById('modal-pitch'),
+    btnClosePitch: document.getElementById('btn-close-pitch'),
   };
 
   const toastContainer = document.getElementById('toast-container');
@@ -1222,7 +1226,7 @@
   };
 
   // =========================================================================
-  // 7. Modals (QR Code & Supabase Cloud Setup)
+  // 7. Modals (QR Code, Pitch Deck, & Supabase Cloud Setup)
   // =========================================================================
   const ModalController = {
     init() {
@@ -1248,15 +1252,76 @@
         ModalController.openCloud();
       });
 
-      // Close QR Modal
-      modals.btnCloseQR.addEventListener('click', () => {
-        modals.qr.classList.add('hidden');
+      // Open Pitch Modal
+      if (topNav.btnPitchModal) {
+        topNav.btnPitchModal.addEventListener('click', () => {
+          AudioFX.tap();
+          ModalController.openPitch();
+        });
+      }
+
+      // Close Modals
+      modals.btnCloseQR.addEventListener('click', () => modals.qr.classList.add('hidden'));
+      modals.btnCloseCloud.addEventListener('click', () => modals.cloud.classList.add('hidden'));
+      if (modals.btnClosePitch) {
+        modals.btnClosePitch.addEventListener('click', () => modals.pitch.classList.add('hidden'));
+      }
+
+      // Pitch Deck Tabs Switcher
+      document.querySelectorAll('.pitch-tab').forEach((tabBtn) => {
+        tabBtn.addEventListener('click', () => {
+          AudioFX.tap();
+          const targetTab = tabBtn.dataset.tab;
+          document.querySelectorAll('.pitch-tab').forEach((b) => b.classList.remove('active'));
+          document.querySelectorAll('.pitch-tab-pane').forEach((p) => p.classList.add('hidden'));
+
+          tabBtn.classList.add('active');
+          const pane = document.getElementById(targetTab);
+          if (pane) pane.classList.remove('hidden');
+        });
       });
 
-      // Close Cloud Modal
-      modals.btnCloseCloud.addEventListener('click', () => {
-        modals.cloud.classList.add('hidden');
-      });
+      // Viral Host Party CTA
+      const btnViral = document.getElementById('btn-viral-create');
+      if (btnViral) {
+        btnViral.addEventListener('click', () => {
+          AudioFX.tap();
+          AppRouter.navigateToLanding();
+          setTimeout(() => {
+            LandingController.handleCreateRoom();
+          }, 150);
+        });
+      }
+
+      // Export Tracklist & Recap
+      const btnExport = document.getElementById('btn-export-recap');
+      if (btnExport) {
+        btnExport.addEventListener('click', () => {
+          if (!currentRoomCode) return;
+          AudioFX.vote();
+          const songs = Storage.getSongs(currentRoomCode);
+          songs.sort((a, b) => (b.votes - a.votes) || (a.createdAt - b.createdAt));
+
+          const vibes = Storage.getVibes(currentRoomCode);
+          const fireCount = vibes.filter((v) => v.value === 'fire').length;
+          const sleepyCount = vibes.filter((v) => v.value === 'sleepy').length;
+
+          let recap = `🎉 PartyPulse Live Recap — Room [${currentRoomCode}]\n`;
+          recap += `🌡️ Crowd Temperature: ${fireCount} 🔥 / ${sleepyCount} 😴\n\n`;
+          recap += `🎵 Top Voted Tracks:\n`;
+
+          if (songs.length === 0) {
+            recap += `(No tracks requested yet)\n`;
+          } else {
+            songs.forEach((s, idx) => {
+              recap += `${idx + 1}. ${s.title} — ${s.votes} votes\n`;
+            });
+          }
+
+          recap += `\nGenerated live with PartyPulse PRO ✨`;
+          RoomController.copyText(recap, 'Party tracklist & recap copied to clipboard! 📋');
+        });
+      }
 
       // Copy Share Link in QR modal
       modals.btnCopyShareLink.addEventListener('click', () => {
@@ -1306,7 +1371,8 @@
       });
 
       // Close on background click
-      [modals.qr, modals.cloud].forEach((overlay) => {
+      [modals.qr, modals.cloud, modals.pitch].forEach((overlay) => {
+        if (!overlay) return;
         overlay.addEventListener('click', (e) => {
           if (e.target === overlay) {
             overlay.classList.add('hidden');
@@ -1329,6 +1395,12 @@
       modals.inputSbUrl.value = savedUrl;
       modals.inputSbKey.value = savedKey;
       modals.cloud.classList.remove('hidden');
+    },
+
+    openPitch() {
+      if (modals.pitch) {
+        modals.pitch.classList.remove('hidden');
+      }
     },
   };
 

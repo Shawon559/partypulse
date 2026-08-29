@@ -1726,9 +1726,235 @@ body {
   to { opacity: 0; transform: translateY(-10px) scale(0.9); }
 }
 
-@keyframes meshPulse {
-  0% { transform: scale(1) translate(0, 0); }
-  100% { transform: scale(1.15) translate(30px, 20px); }
+/* --- Viral Growth CTA Card --- */
+.viral-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(139, 0, 255, 0.15) 0%, rgba(255, 0, 127, 0.08) 100%);
+  border: 1px solid rgba(255, 0, 127, 0.25);
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+}
+
+.viral-card-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.viral-icon {
+  font-size: 1.4rem;
+  filter: drop-shadow(0 0 8px var(--neon-magenta));
+}
+
+.viral-title {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.viral-sub {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.btn-sm {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+
+/* --- Queue Actions & Export --- */
+.queue-footer-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.btn-pill-action {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--transition-instant);
+}
+
+.btn-pill-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--cyber-cyan);
+  color: var(--cyber-cyan);
+  transform: translateY(-1px);
+}
+
+/* --- Pitch Deck / Judge Modal Styles --- */
+.modal-card-xl {
+  max-width: 580px;
+}
+
+.btn-pitch {
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.15), rgba(255, 85, 0, 0.1));
+  border-color: rgba(255, 209, 102, 0.4);
+  color: #ffd166;
+}
+.btn-pitch:hover {
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.25), rgba(255, 85, 0, 0.2));
+  border-color: #ffd166;
+  box-shadow: 0 0 12px rgba(255, 209, 102, 0.3);
+}
+
+.pitch-trophy-badge {
+  font-size: 1.8rem;
+  filter: drop-shadow(0 0 10px rgba(255, 209, 102, 0.6));
+}
+
+.pitch-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pitch-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-instant);
+}
+
+.pitch-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pitch-tab.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--neon-magenta), var(--electric-purple));
+  box-shadow: 0 0 12px var(--neon-magenta-glow);
+}
+
+.pitch-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: viewFadeIn 0.2s ease-out;
+}
+
+.pitch-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pitch-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pitch-card {
+  background: rgba(10, 8, 24, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+
+.pcard-badge {
+  align-self: flex-start;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+.badge-green { background: rgba(0, 255, 136, 0.15); color: var(--laser-green); border: 1px solid rgba(0, 255, 136, 0.3); }
+.badge-blue { background: rgba(0, 240, 255, 0.15); color: var(--cyber-cyan); border: 1px solid var(--border-cyan); }
+.badge-purple { background: rgba(139, 0, 255, 0.2); color: #c77dff; border: 1px solid rgba(139, 0, 255, 0.4); }
+.badge-pink { background: rgba(255, 0, 127, 0.15); color: var(--neon-magenta); border: 1px solid var(--border-glow); }
+.badge-gold { background: rgba(255, 209, 102, 0.15); color: var(--gold-accent); border: 1px solid var(--border-gold); }
+
+.pcard-title {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.pcard-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.pcard-list {
+  list-style: none;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.viral-formula-box {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  color: var(--cyber-cyan);
+  margin-top: 4px;
+}
+
+.pitch-stat-box {
+  background: rgba(10, 8, 24, 0.8);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 10px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pstat-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: var(--gold-accent);
+  text-shadow: 0 0 10px rgba(255, 209, 102, 0.4);
+}
+
+.pstat-lbl {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.mt-10 {
+  margin-top: 10px;
 }
 
 /* --- Mobile Responsiveness (375px viewport optimized) --- */
@@ -1758,5 +1984,8 @@ body {
   }
   .room-header {
     padding: 10px 12px;
+  }
+  .pitch-grid-2, .pitch-grid-3 {
+    grid-template-columns: 1fr;
   }
 }
