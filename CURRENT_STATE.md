@@ -74,3 +74,10 @@ Verified by an automated Playwright suite (2 real browser tabs, 375×812).
 - **16** — Verified the PIN column is genuinely unreadable: `select=code` succeeds
   while `select=*` and `select=host_hash` are both denied for the anon role.
   57/57 tests green across five suites.
+- **17** — Added a `?tv=1` projector deep-link so the DJ can run the room from a
+  phone while a laptop drives the big screen. Display-only: verified the opening
+  device still reports GUEST with no removal controls.
+- **18** — Packaged for review: `SUBMISSION.md`, source, six test suites and
+  screenshots. 66/66 green locally and against production.
+
+STATUS: DONE
