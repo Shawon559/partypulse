@@ -1,1468 +1,820 @@
-/**
- * PartyPulse PRO — Live Party Engagement Web App
- * Features: Supabase Realtime Cloud Sync + Local BroadcastChannel Fallback
- * Web Audio FX Synthesizer + Interactive QR Code + Ambient Particle Canvas
- */
-
+/* =============================================================================
+   PartyPulse — live crowd queue + energy meter
+   Plain ES2017. Supabase Realtime when configured; BroadcastChannel on-device.
+   ============================================================================= */
 (function () {
-  'use strict';
+'use strict';
 
-  // --- Storage Keys ---
-  const STORAGE_KEYS = {
-    ROOMS: 'partypulse_rooms',
-    SONGS_PREFIX: 'partypulse_songs_',
-    VIBES_PREFIX: 'partypulse_vibes_',
-    RECENT_ROOMS: 'partypulse_recent_rooms',
-    SOUND_ENABLED: 'partypulse_sound_enabled',
-    SB_URL: 'partypulse_sb_url',
-    SB_KEY: 'partypulse_sb_key',
-  };
+/* --------------------------------------------------------------- 0. config */
+/* Paste credentials here to bake them in, or enter them via the LOCAL chip
+   in the top-left of the entry screen (stored per-browser). */
+const SUPABASE_URL      = '';
+const SUPABASE_ANON_KEY = '';
 
-  const VIBE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes rolling window
-  const VIBE_TICK_INTERVAL_MS = 3000;
+const K = {
+  url:'pp.url', key:'pp.key', rooms:'pp.rooms', recent:'pp.recent',
+  songs:c=>'pp.s.'+c, vibes:c=>'pp.v.'+c
+};
+const WINDOW_MS = 5*60*1000;   // rolling vibe window
+const TICK_MS   = 4000;        // re-evaluate the window on a timer
 
-  // --- Global App State ---
-  let currentRoomCode = null;
-  let broadcastChannel = null;
-  let vibeDecayTimer = null;
-  let soundEnabled = true;
-  let supabaseClient = null;
-  let supabaseRealtimeChannel = null;
-  let isCloudConnected = false;
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const uid = () => (crypto.randomUUID ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16);
+    }));
 
-  // --- DOM Elements ---
-  const views = {
-    landing: document.getElementById('view-landing'),
-    room: document.getElementById('view-room'),
-  };
+/* ------------------------------------------------------------------ 1. qr */
+/* Minimal but spec-correct QR encoder: byte mode, ECC level M, versions 1-10.
+   Written inline because the brief allows no dependency but a fake QR that
+   does not scan would break the room's primary join path. */
+const QR = (function(){
+  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  for (let i=0,x=1;i<255;i++){ EXP[i]=x; LOG[x]=i; x<<=1; if(x&256) x^=0x11d; }
+  for (let i=255;i<512;i++) EXP[i]=EXP[i-255];
+  const mul = (a,b) => (a===0||b===0) ? 0 : EXP[LOG[a]+LOG[b]];
 
-  const topNav = {
-    btnSound: document.getElementById('btn-sound-toggle'),
-    soundIcon: document.getElementById('sound-icon'),
-    btnCloudModal: document.getElementById('btn-cloud-modal'),
-    cloudStatusDot: document.getElementById('cloud-status-dot'),
-    cloudStatusText: document.getElementById('cloud-status-text'),
-    btnPitchModal: document.getElementById('btn-pitch-modal'),
-  };
-
-  const landing = {
-    btnCreate: document.getElementById('btn-create-room'),
-    btnCreateText: document.querySelector('#btn-create-room .btn-text'),
-    btnCreateSpinner: document.querySelector('#btn-create-room .btn-spinner'),
-    formJoin: document.getElementById('form-join-room'),
-    inputCode: document.getElementById('input-room-code'),
-    btnJoin: document.getElementById('btn-join-room'),
-    errorMsg: document.getElementById('join-error-msg'),
-    recentSection: document.getElementById('recent-rooms-section'),
-    recentList: document.getElementById('recent-rooms-list'),
-  };
-
-  const room = {
-    btnLeave: document.getElementById('btn-leave-room'),
-    btnCopyCode: document.getElementById('btn-copy-code'),
-    displayCode: document.getElementById('display-room-code'),
-    btnShowQR: document.getElementById('btn-show-qr'),
-
-    // Vibe
-    countFire: document.getElementById('count-fire'),
-    countSleepy: document.getElementById('count-sleepy'),
-    statusText: document.getElementById('vibe-status-text'),
-    pctText: document.getElementById('vibe-percentage-text'),
-    barFill: document.getElementById('vibe-bar-fill'),
-    btnVibeFire: document.getElementById('btn-vibe-fire'),
-    btnVibeSleepy: document.getElementById('btn-vibe-sleepy'),
-
-    // Song Queue
-    songCountBadge: document.getElementById('song-count-badge'),
-    formAddSong: document.getElementById('form-add-song'),
-    inputSongTitle: document.getElementById('input-song-title'),
-    songErrorMsg: document.getElementById('song-error-msg'),
-    emptyState: document.getElementById('queue-empty-state'),
-    songList: document.getElementById('song-list'),
-  };
-
-  const modals = {
-    qr: document.getElementById('modal-qr'),
-    btnCloseQR: document.getElementById('btn-close-qr'),
-    qrSvg: document.getElementById('qr-code-svg'),
-    qrDisplayCode: document.getElementById('qr-display-code'),
-    btnCopyShareLink: document.getElementById('btn-copy-share-link'),
-
-    cloud: document.getElementById('modal-cloud'),
-    btnCloseCloud: document.getElementById('btn-close-cloud'),
-    cloudBanner: document.getElementById('cloud-banner-text'),
-    formCloud: document.getElementById('form-supabase-config'),
-    inputSbUrl: document.getElementById('input-sb-url'),
-    inputSbKey: document.getElementById('input-sb-key'),
-    btnSaveCloud: document.getElementById('btn-save-cloud'),
-    btnClearCloud: document.getElementById('btn-clear-cloud'),
-    btnCopySql: document.getElementById('btn-copy-sql'),
-
-    pitch: document.getElementById('modal-pitch'),
-    btnClosePitch: document.getElementById('btn-close-pitch'),
-  };
-
-  const toastContainer = document.getElementById('toast-container');
-
-  // =========================================================================
-  // 1. Procedural Web Audio Synthesizer FX
-  // =========================================================================
-  let audioCtx = null;
-
-  function initAudioContext() {
-    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new AudioContextClass();
+  function rsPoly(n){
+    let p=[1];
+    for(let i=0;i<n;i++){
+      const q=new Array(p.length+1).fill(0);
+      for(let j=0;j<p.length;j++){ q[j]^=mul(p[j],1); q[j+1]^=mul(p[j],EXP[i]); }
+      p=q;
     }
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
+    return p;
+  }
+  function rsEncode(data,ecLen){
+    const gen=rsPoly(ecLen), res=new Array(ecLen).fill(0);
+    for(const d of data){
+      const factor=d^res[0];
+      res.shift(); res.push(0);
+      for(let i=0;i<ecLen;i++) res[i]^=mul(gen[i+1],factor);
     }
+    return res;
   }
 
-  const AudioFX = {
-    playTone(freq, type = 'sine', duration = 0.15, gainVal = 0.1) {
-      if (!soundEnabled) return;
-      try {
-        initAudioContext();
-        if (!audioCtx) return;
-
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-
-        gain.gain.setValueAtTime(gainVal, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
-
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
-      } catch (e) {}
-    },
-
-    tap() {
-      AudioFX.playTone(600, 'triangle', 0.08, 0.08);
-    },
-
-    vote() {
-      if (!soundEnabled) return;
-      try {
-        initAudioContext();
-        if (!audioCtx) return;
-        const now = audioCtx.currentTime;
-        const notes = [523.25, 659.25, 783.99]; // C5, E5, G5 major triad
-        notes.forEach((freq, i) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, now + i * 0.05);
-          gain.gain.setValueAtTime(0.08, now + i * 0.05);
-          gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.05 + 0.14);
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.start(now + i * 0.05);
-          osc.stop(now + i * 0.05 + 0.15);
-        });
-      } catch (e) {}
-    },
-
-    fire() {
-      if (!soundEnabled) return;
-      try {
-        initAudioContext();
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(220, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.22);
-        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25);
-      } catch (e) {}
-    },
-
-    sleepy() {
-      if (!soundEnabled) return;
-      try {
-        initAudioContext();
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(220, audioCtx.currentTime + 0.3);
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.32);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.32);
-      } catch (e) {}
-    },
-
-    fanfare() {
-      if (!soundEnabled) return;
-      try {
-        initAudioContext();
-        if (!audioCtx) return;
-        const now = audioCtx.currentTime;
-        const chords = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
-        chords.forEach((freq, idx) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
-          gain.gain.setValueAtTime(0.1, now + idx * 0.08);
-          gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.08 + 0.3);
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.start(now + idx * 0.08);
-          osc.stop(now + idx * 0.08 + 0.32);
-        });
-      } catch (e) {}
-    },
+  // [ecPerBlock, g1Blocks, g1Data, g2Blocks, g2Data] for ECC level M
+  const SPEC = {
+    1:[10,1,16,0,0],  2:[16,1,28,0,0],  3:[26,1,44,0,0],  4:[18,2,32,0,0],
+    5:[24,2,43,0,0],  6:[16,4,27,0,0],  7:[18,4,31,0,0],  8:[22,2,38,2,39],
+    9:[22,3,36,2,37], 10:[26,4,43,1,44]
   };
+  const ALIGN = {1:[],2:[6,18],3:[6,22],4:[6,26],5:[6,30],
+                 6:[6,34],7:[6,22,38],8:[6,24,42],9:[6,26,46],10:[6,28,50]};
 
-  // =========================================================================
-  // 2. Ambient Particle Canvas Engine
-  // =========================================================================
-  const CanvasVisualizer = {
-    canvas: null,
-    ctx: null,
-    particles: [],
-    animId: null,
+  const bchFormat = d => { let v=d<<10; for(let i=4;i>=0;i--) if(v&(1<<(i+10))) v^=0x537<<i; return ((d<<10)|v)^0x5412; };
+  const bchVersion = d => { let v=d<<12; for(let i=5;i>=0;i--) if(v&(1<<(i+12))) v^=0x1f25<<i; return (d<<12)|v; };
 
-    init() {
-      this.canvas = document.getElementById('bg-canvas');
-      if (!this.canvas) return;
-      this.ctx = this.canvas.getContext('2d');
-      this.resize();
-      window.addEventListener('resize', () => this.resize());
-
-      // Seed particles
-      const count = window.innerWidth < 480 ? 30 : 60;
-      this.particles = [];
-      for (let i = 0; i < count; i++) {
-        this.particles.push({
-          x: Math.random() * this.canvas.width,
-          y: Math.random() * this.canvas.height,
-          radius: Math.random() * 2 + 0.6,
-          vx: (Math.random() - 0.5) * 0.4,
-          vy: (Math.random() - 0.5) * 0.4,
-          alpha: Math.random() * 0.6 + 0.2,
-          hue: Math.random() > 0.5 ? 320 : 190, // Neon pink or cyan
-        });
-      }
-
-      this.animate();
-    },
-
-    resize() {
-      if (!this.canvas) return;
-      this.canvas.width = window.innerWidth;
-      this.canvas.height = window.innerHeight;
-    },
-
-    animate() {
-      const { ctx, canvas, particles } = this;
-      if (!ctx || !canvas) return;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
-        if (p.y < 0) p.y = canvas.height;
-        if (p.y > canvas.height) p.y = 0;
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${p.hue}, 90%, 65%, ${p.alpha})`;
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = `hsla(${p.hue}, 90%, 65%, 0.8)`;
-        ctx.fill();
-      }
-
-      this.animId = requestAnimationFrame(() => this.animate());
-    },
-  };
-
-  // =========================================================================
-  // 3. Pure-JS SVG QR Code Generator (Zero Dependencies)
-  // =========================================================================
-  const QRGenerator = {
-    // Generate a clean scannable SVG QR code
-    generateSVG(text) {
-      const encoded = encodeURIComponent(text);
-      // Generate clean vector QR using a responsive data grid
-      const size = 200;
-      const modules = 25; // 25x25 grid
-      const cellSize = size / modules;
-      
-      // Deterministic hash based on text
-      let hash = 0;
-      for (let i = 0; i < text.length; i++) {
-        hash = (hash << 5) - hash + text.charCodeAt(i);
-        hash |= 0;
-      }
-
-      let rects = '';
-      
-      // Draw standard finder patterns at 3 corners
-      function drawFinder(startX, startY) {
-        // Outer 7x7
-        rects += `<rect x="${startX * cellSize}" y="${startY * cellSize}" width="${7 * cellSize}" height="${7 * cellSize}" fill="#070611"/>`;
-        rects += `<rect x="${(startX + 1) * cellSize}" y="${(startY + 1) * cellSize}" width="${5 * cellSize}" height="${5 * cellSize}" fill="#ffffff"/>`;
-        rects += `<rect x="${(startX + 2) * cellSize}" y="${(startY + 2) * cellSize}" width="${3 * cellSize}" height="${3 * cellSize}" fill="#070611"/>`;
-      }
-
-      drawFinder(1, 1);
-      drawFinder(modules - 8, 1);
-      drawFinder(1, modules - 8);
-
-      // Fill data cells
-      for (let r = 0; r < modules; r++) {
-        for (let c = 0; c < modules; c++) {
-          // Skip finder patterns
-          if ((r < 9 && c < 9) || (r < 9 && c >= modules - 9) || (r >= modules - 9 && c < 9)) {
-            continue;
-          }
-          // Pseudo-random bit based on text hash and coordinates
-          const bit = Math.abs(Math.sin((hash + r * 31 + c * 17) * 9999)) > 0.45;
-          if (bit) {
-            rects += `<rect x="${c * cellSize}" y="${r * cellSize}" width="${cellSize}" height="${cellSize}" fill="#070611"/>`;
-          }
-        }
-      }
-
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="100%" height="100%">
-        <rect width="${size}" height="${size}" fill="#ffffff" rx="10"/>
-        ${rects}
-      </svg>`;
-    },
-  };
-
-  // =========================================================================
-  // 4. Supabase Cloud Sync Engine & Local Storage Layer
-  // =========================================================================
-  const CloudEngine = {
-    init() {
-      const url = localStorage.getItem(STORAGE_KEYS.SB_URL);
-      const key = localStorage.getItem(STORAGE_KEYS.SB_KEY);
-
-      if (url && key && window.supabase && typeof window.supabase.createClient === 'function') {
-        try {
-          supabaseClient = window.supabase.createClient(url, key);
-          isCloudConnected = true;
-          this.updateNavStatus(true);
-          this.testConnection();
-        } catch (e) {
-          console.warn('Supabase initialization failed, falling back to local mode:', e);
-          isCloudConnected = false;
-          this.updateNavStatus(false);
-        }
-      } else {
-        isCloudConnected = false;
-        this.updateNavStatus(false);
-      }
-    },
-
-    updateNavStatus(connected) {
-      if (connected) {
-        topNav.cloudStatusDot.className = 'status-dot dot-cloud';
-        topNav.cloudStatusText.textContent = 'Cloud';
-        modals.cloudBanner.textContent = '🟢 Connected to Supabase Cloud! Real-time multi-device sync is ACTIVE.';
-      } else {
-        topNav.cloudStatusDot.className = 'status-dot dot-local';
-        topNav.cloudStatusText.textContent = 'Local';
-        modals.cloudBanner.textContent = '🟡 In High-Speed Local Multi-Tab Mode. Connect Supabase for multi-device internet sync.';
-      }
-    },
-
-    async testConnection() {
-      if (!supabaseClient) return;
-      try {
-        const { error } = await supabaseClient.from('rooms').select('code').limit(1);
-        if (error && error.code !== 'PGRST116') {
-          console.warn('Supabase test select note:', error.message);
-        }
-      } catch (e) {}
-    },
-
-    async subscribeToRoom(roomCode) {
-      if (!supabaseClient || !roomCode) return;
-
-      if (supabaseRealtimeChannel) {
-        supabaseClient.removeChannel(supabaseRealtimeChannel);
-      }
-
-      try {
-        supabaseRealtimeChannel = supabaseClient
-          .channel(`room_${roomCode}`)
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'songs', filter: `room_code=eq.${roomCode}` },
-            async () => {
-              await CloudEngine.fetchAndSyncSongs(roomCode);
-              RoomController.renderSongs();
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'vibes', filter: `room_code=eq.${roomCode}` },
-            async () => {
-              await CloudEngine.fetchAndSyncVibes(roomCode);
-              RoomController.renderVibes();
-            }
-          )
-          .subscribe();
-      } catch (e) {
-        console.warn('Realtime subscription fallback to local sync:', e);
-      }
-    },
-
-    async fetchAndSyncSongs(roomCode) {
-      if (!supabaseClient) return;
-      try {
-        const { data, error } = await supabaseClient
-          .from('songs')
-          .select('*')
-          .eq('room_code', roomCode);
-
-        if (!error && Array.isArray(data)) {
-          const songs = data.map((d) => ({
-            id: d.id,
-            roomCode: d.room_code,
-            title: d.title,
-            votes: d.votes || 0,
-            createdAt: new Date(d.created_at).getTime() || Date.now(),
-          }));
-          Storage.saveSongs(roomCode, songs);
-        }
-      } catch (e) {}
-    },
-
-    async fetchAndSyncVibes(roomCode) {
-      if (!supabaseClient) return;
-      try {
-        const { data, error } = await supabaseClient
-          .from('vibes')
-          .select('*')
-          .eq('room_code', roomCode);
-
-        if (!error && Array.isArray(data)) {
-          const vibes = data.map((d) => ({
-            id: d.id,
-            roomCode: d.room_code,
-            value: d.value,
-            timestamp: Number(d.timestamp),
-          }));
-          Storage.saveVibes(roomCode, vibes);
-        }
-      } catch (e) {}
-    },
-
-    async syncCreateRoom(roomObj) {
-      if (supabaseClient) {
-        try {
-          await supabaseClient.from('rooms').upsert({
-            code: roomObj.code,
-            created_at: new Date(roomObj.createdAt).toISOString(),
-          });
-        } catch (e) {}
-      }
-    },
-
-    async syncAddSong(songObj) {
-      if (supabaseClient) {
-        try {
-          await supabaseClient.from('songs').upsert({
-            id: songObj.id,
-            room_code: songObj.roomCode,
-            title: songObj.title,
-            votes: songObj.votes,
-            created_at: new Date(songObj.createdAt).toISOString(),
-          });
-        } catch (e) {}
-      }
-    },
-
-    async syncVoteSong(songId, roomCode, votes) {
-      if (supabaseClient) {
-        try {
-          await supabaseClient
-            .from('songs')
-            .update({ votes: votes })
-            .eq('id', songId);
-        } catch (e) {}
-      }
-    },
-
-    async syncAddVibe(vibeObj) {
-      if (supabaseClient) {
-        try {
-          await supabaseClient.from('vibes').upsert({
-            id: vibeObj.id,
-            room_code: vibeObj.roomCode,
-            value: vibeObj.value,
-            timestamp: vibeObj.timestamp,
-          });
-        } catch (e) {}
-      }
-    },
-  };
-
-  // --- Local Storage Management ---
-  const Storage = {
-    getRooms() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEYS.ROOMS);
-        return raw ? JSON.parse(raw) : [];
-      } catch (e) {
-        return [];
-      }
-    },
-
-    saveRooms(rooms) {
-      try {
-        localStorage.setItem(STORAGE_KEYS.ROOMS, JSON.stringify(rooms));
-      } catch (e) {}
-    },
-
-    roomExists(code) {
-      if (!code) return false;
-      const upper = code.toUpperCase();
-      const rooms = Storage.getRooms();
-      return rooms.some((r) => r.code === upper);
-    },
-
-    createRoom(code) {
-      const rooms = Storage.getRooms();
-      const upperCode = code.toUpperCase();
-      const existing = rooms.find((r) => r.code === upperCode);
-      if (existing) return existing;
-
-      const newRoom = {
-        code: upperCode,
-        createdAt: Date.now(),
-      };
-      rooms.push(newRoom);
-      Storage.saveRooms(rooms);
-      Storage.addRecentRoom(upperCode);
-      CloudEngine.syncCreateRoom(newRoom);
-      return newRoom;
-    },
-
-    getSongs(roomCode) {
-      if (!roomCode) return [];
-      try {
-        const raw = localStorage.getItem(STORAGE_KEYS.SONGS_PREFIX + roomCode);
-        return raw ? JSON.parse(raw) : [];
-      } catch (e) {
-        return [];
-      }
-    },
-
-    saveSongs(roomCode, songs) {
-      if (!roomCode) return;
-      try {
-        localStorage.setItem(STORAGE_KEYS.SONGS_PREFIX + roomCode, JSON.stringify(songs));
-      } catch (e) {}
-    },
-
-    getVibes(roomCode) {
-      if (!roomCode) return [];
-      try {
-        const raw = localStorage.getItem(STORAGE_KEYS.VIBES_PREFIX + roomCode);
-        return raw ? JSON.parse(raw) : [];
-      } catch (e) {
-        return [];
-      }
-    },
-
-    saveVibes(roomCode, vibes) {
-      if (!roomCode) return;
-      try {
-        localStorage.setItem(STORAGE_KEYS.VIBES_PREFIX + roomCode, JSON.stringify(vibes));
-      } catch (e) {}
-    },
-
-    getRecentRooms() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEYS.RECENT_ROOMS);
-        return raw ? JSON.parse(raw) : [];
-      } catch (e) {
-        return [];
-      }
-    },
-
-    addRecentRoom(code) {
-      try {
-        let recents = Storage.getRecentRooms().filter((c) => c !== code);
-        recents.unshift(code);
-        if (recents.length > 6) recents = recents.slice(0, 6);
-        localStorage.setItem(STORAGE_KEYS.RECENT_ROOMS, JSON.stringify(recents));
-      } catch (e) {}
-    },
-  };
-
-  // --- BroadcastChannel Cross-Tab Sync Engine ---
-  const SyncEngine = {
-    init() {
-      if (typeof window.BroadcastChannel !== 'undefined') {
-        broadcastChannel = new BroadcastChannel('partypulse_pro_channel');
-        broadcastChannel.onmessage = (event) => {
-          SyncEngine.handleMessage(event.data);
-        };
-      } else {
-        window.addEventListener('storage', (event) => {
-          if (!event.key || !currentRoomCode) return;
-          if (event.key === STORAGE_KEYS.SONGS_PREFIX + currentRoomCode) {
-            RoomController.renderSongs();
-          } else if (event.key === STORAGE_KEYS.VIBES_PREFIX + currentRoomCode) {
-            RoomController.renderVibes();
-          }
-        });
-      }
-    },
-
-    broadcast(action) {
-      if (broadcastChannel) {
-        broadcastChannel.postMessage(action);
-      }
-    },
-
-    handleMessage(data) {
-      if (!data || !data.type) return;
-      if (data.roomCode && data.roomCode !== currentRoomCode) return;
-
-      switch (data.type) {
-        case 'SONG_ADDED':
-        case 'SONG_VOTED':
-        case 'SONGS_UPDATED':
-          RoomController.renderSongs();
-          break;
-
-        case 'VIBE_TAPPED':
-        case 'VIBES_UPDATED':
-          RoomController.renderVibes();
-          break;
-
-        case 'REACTION':
-          if (data.emoji) {
-            RoomController.spawnFloatingParticle(data.emoji, null);
-          }
-          break;
-
-        default:
-          break;
-      }
-    },
-  };
-
-  // --- Toast Notification Helper ---
-  function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast ${type === 'success' ? 'toast-success' : type === 'error' ? 'toast-error' : ''}`;
-    toast.textContent = message;
-
-    toastContainer.appendChild(toast);
-
-    setTimeout(() => {
-      toast.classList.add('toast-leave');
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 250);
-    }, 2400);
-  }
-
-  // --- Random 4-Letter Uppercase Code Generator ---
-  function generateRandomRoomCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+  function pickVersion(len){
+    for(let v=1;v<=10;v++){
+      const s=SPEC[v], cap=s[1]*s[2]+s[3]*s[4];
+      const header = 4 + (v<10?8:16);
+      if (cap*8 >= header + len*8) return v;
     }
-    return code;
+    return null;
   }
 
-  // =========================================================================
-  // 5. Landing View Controller
-  // =========================================================================
-  const LandingController = {
-    init() {
-      // Auto-uppercase input & filter alphanumeric
-      landing.inputCode.addEventListener('input', (e) => {
-        e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        LandingController.hideError();
-      });
+  function build(text){
+    const bytes = Array.from(new TextEncoder().encode(text));
+    const ver = pickVersion(bytes.length);
+    if (!ver) return null;
+    const [ecLen,g1,d1,g2,d2] = SPEC[ver];
+    const totalData = g1*d1 + g2*d2;
 
-      // Create Room Button
-      landing.btnCreate.addEventListener('click', () => {
-        AudioFX.tap();
-        LandingController.handleCreateRoom();
-      });
+    // --- bit stream: mode 0100 + length + payload + terminator + pad
+    const bits=[];
+    const push=(val,n)=>{ for(let i=n-1;i>=0;i--) bits.push((val>>i)&1); };
+    push(0b0100,4);
+    push(bytes.length, ver<10?8:16);
+    bytes.forEach(b=>push(b,8));
+    for(let i=0;i<4 && bits.length<totalData*8;i++) bits.push(0);
+    while(bits.length%8) bits.push(0);
+    const words=[];
+    for(let i=0;i<bits.length;i+=8) words.push(parseInt(bits.slice(i,i+8).join(''),2));
+    const PADS=[0xec,0x11];
+    for(let i=0; words.length<totalData; i++) words.push(PADS[i%2]);
 
-      // Join Room Form
-      landing.formJoin.addEventListener('submit', (e) => {
+    // --- split into blocks, interleave data then ec
+    const blocks=[]; let at=0;
+    for(let i=0;i<g1;i++){ blocks.push(words.slice(at,at+d1)); at+=d1; }
+    for(let i=0;i<g2;i++){ blocks.push(words.slice(at,at+d2)); at+=d2; }
+    const ecs = blocks.map(b=>rsEncode(b,ecLen));
+
+    const stream=[];
+    const maxD=Math.max(d1,d2);
+    for(let i=0;i<maxD;i++) blocks.forEach(b=>{ if(i<b.length) stream.push(b[i]); });
+    for(let i=0;i<ecLen;i++) ecs.forEach(e=>stream.push(e[i]));
+
+    // --- matrix
+    const size = ver*4+17;
+    const M = Array.from({length:size},()=>new Array(size).fill(null)); // null = free
+    const set=(r,c,v)=>{ if(r>=0&&r<size&&c>=0&&c<size) M[r][c]=v; };
+
+    function finder(r,c){
+      for(let i=-1;i<=7;i++) for(let j=-1;j<=7;j++){
+        const rr=r+i, cc=c+j;
+        if(rr<0||rr>=size||cc<0||cc>=size) continue;
+        const on = (i>=0&&i<=6&&(j===0||j===6)) || (j>=0&&j<=6&&(i===0||i===6)) ||
+                   (i>=2&&i<=4&&j>=2&&j<=4);
+        set(rr,cc,on?1:0);
+      }
+    }
+    finder(0,0); finder(0,size-7); finder(size-7,0);
+
+    for(let i=8;i<size-8;i++){ const b=i%2===0?1:0; set(6,i,b); set(i,6,b); }
+
+    ALIGN[ver].forEach(r=>ALIGN[ver].forEach(c=>{
+      if((r===6&&c===6)||(r===6&&c===size-7)||(r===size-7&&c===6)) return;
+      for(let i=-2;i<=2;i++) for(let j=-2;j<=2;j++)
+        set(r+i,c+j,(Math.max(Math.abs(i),Math.abs(j))!==1)?1:0);
+    }));
+
+    set(size-8,8,1); // dark module
+
+    // reserve format areas
+    for(let i=0;i<9;i++){ if(M[8][i]===null) set(8,i,0); if(M[i][8]===null) set(i,8,0); }
+    for(let i=0;i<8;i++){ set(8,size-1-i,0); set(size-1-i,8,0); }
+    if(ver>=7) for(let i=0;i<18;i++){
+      const r=Math.floor(i/3), c=i%3;
+      set(size-11+c,r,0); set(r,size-11+c,0);
+    }
+
+    // --- place data, zig-zag upward in 2-column strips
+    const reserved = M.map(row=>row.map(v=>v!==null));
+    let bit=0, up=true;
+    for(let col=size-1; col>0; col-=2){
+      if(col===6) col--;
+      for(let k=0;k<size;k++){
+        const row = up ? size-1-k : k;
+        for(let d=0;d<2;d++){
+          const c = col-d;
+          if(reserved[row][c]) continue;
+          const byteI=bit>>3;
+          M[row][c] = byteI<stream.length ? (stream[byteI]>>(7-(bit&7)))&1 : 0;
+          bit++;
+        }
+      }
+      up=!up;
+    }
+
+    const MASKS=[
+      (r,c)=>(r+c)%2===0, (r,c)=>r%2===0, (r,c)=>c%3===0, (r,c)=>(r+c)%3===0,
+      (r,c)=>((r>>1)+Math.floor(c/3))%2===0, (r,c)=>((r*c)%2)+((r*c)%3)===0,
+      (r,c)=>(((r*c)%2)+((r*c)%3))%2===0, (r,c)=>(((r+c)%2)+((r*c)%3))%2===0
+    ];
+
+    function penalty(g){
+      let p=0;
+      // rule 1: runs of 5+
+      for(let i=0;i<size;i++){
+        for(const line of [g[i], g.map(r=>r[i])]){
+          let run=1;
+          for(let j=1;j<size;j++){
+            if(line[j]===line[j-1]) run++;
+            else { if(run>=5) p+=3+(run-5); run=1; }
+          }
+          if(run>=5) p+=3+(run-5);
+        }
+      }
+      // rule 2: 2x2 blocks
+      for(let r=0;r<size-1;r++) for(let c=0;c<size-1;c++)
+        if(g[r][c]===g[r][c+1] && g[r][c]===g[r+1][c] && g[r][c]===g[r+1][c+1]) p+=3;
+      // rule 3: finder-like patterns
+      const P1=[1,0,1,1,1,0,1,0,0,0,0], P2=[0,0,0,0,1,0,1,1,1,0,1];
+      const hit=(line,i,pat)=>pat.every((v,k)=>line[i+k]===v);
+      for(let i=0;i<size;i++){
+        const rows=g[i], cols=g.map(r=>r[i]);
+        for(let j=0;j+11<=size;j++){
+          if(hit(rows,j,P1)||hit(rows,j,P2)) p+=40;
+          if(hit(cols,j,P1)||hit(cols,j,P2)) p+=40;
+        }
+      }
+      // rule 4: dark ratio
+      let dark=0; g.forEach(r=>r.forEach(v=>dark+=v));
+      p += Math.floor(Math.abs(dark*100/(size*size)-50)/5)*10;
+      return p;
+    }
+
+    // Both format copies, paired cell-by-cell in canonical MSB-to-LSB order.
+    const fmtCells=[];
+    for(let i=0;i<=5;i++) fmtCells.push([[8,i],[size-1-i,8]]);
+    fmtCells.push([[8,7],[size-7,8]]);
+    fmtCells.push([[8,8],[8,size-8]]);
+    fmtCells.push([[7,8],[8,size-7]]);
+    for(let i=9;i<15;i++) fmtCells.push([[14-i,8],[8,size-15+i]]);
+
+    let best=null, bestMask=0, bestScore=Infinity;
+    for(let m=0;m<8;m++){
+      const g = M.map((row,r)=>row.map((v,c)=>reserved[r][c] ? v : (v^(MASKS[m](r,c)?1:0))));
+      const fmt = bchFormat((0b00<<3)|m);   // 00 = ECC level M
+      fmtCells.forEach(([a,b2],k)=>{
+        const b=(fmt>>(14-k))&1;
+        g[a[0]][a[1]]=b; g[b2[0]][b2[1]]=b;
+      });
+      g[size-8][8]=1; // dark module, never part of the format payload
+      if(ver>=7){
+        const vinfo=bchVersion(ver);
+        for(let i=0;i<18;i++){
+          const b=(vinfo>>i)&1, r=Math.floor(i/3), c=i%3;
+          g[size-11+c][r]=b; g[r][size-11+c]=b;
+        }
+      }
+      const s=penalty(g);
+      if(s<bestScore){ bestScore=s; best=g; bestMask=m; }
+    }
+    return best;
+  }
+
+  return {
+    svg(text){
+      const g = build(text);
+      if(!g) return '';
+      const n=g.length, q=2, dim=n+q*2;
+      let d='';
+      for(let r=0;r<n;r++) for(let c=0;c<n;c++)
+        if(g[r][c]) d += `M${c+q} ${r+q}h1v1h-1z`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges">`
+           + `<path fill="#08080A" d="${d}"/></svg>`;
+    }
+  };
+})();
+
+/* --------------------------------------------------------------- 2. state */
+const state = { code:null, songs:[], vibes:[], cloud:false };
+let sb = null, chan = null, bus = null, tick = null;
+
+const ls = {
+  get(k,f){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):f; }catch(e){ return f; } },
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} },
+  raw(k){ try{ return localStorage.getItem(k)||''; }catch(e){ return ''; } },
+  put(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+};
+
+/* ---------------------------------------------------------------- 3. cloud */
+const Cloud = {
+  boot(){
+    const url = ls.raw(K.url) || SUPABASE_URL;
+    const key = ls.raw(K.key) || SUPABASE_ANON_KEY;
+    sb = null; state.cloud = false;
+    if (url && key && window.supabase) {
+      try { sb = window.supabase.createClient(url, key); state.cloud = true; }
+      catch(e){ sb = null; state.cloud = false; }
+    }
+    UI.netBadge();
+  },
+
+  async roomExists(code){
+    if(!sb) return null;
+    const { data, error } = await sb.from('rooms').select('code').eq('code',code).limit(1);
+    if(error) throw error;
+    return !!(data && data.length);
+  },
+
+  async createRoom(code){ if(sb) await sb.from('rooms').insert({ code }); },
+
+  async load(code){
+    if(!sb) return false;
+    const since = new Date(Date.now()-WINDOW_MS).toISOString();
+    const [s,v] = await Promise.all([
+      sb.from('songs').select('*').eq('room_code',code),
+      sb.from('vibes').select('*').eq('room_code',code).gte('created_at',since)
+    ]);
+    if(s.error||v.error) return false;
+    state.songs = (s.data||[]).map(Song.fromRow);
+    state.vibes = (v.data||[]).map(Vibe.fromRow);
+    return true;
+  },
+
+  /* Realtime: push-based. Rows arrive as events, never polled. */
+  subscribe(code){
+    if(!sb) return;
+    Cloud.unsubscribe();
+    chan = sb.channel('room:'+code)
+      .on('postgres_changes',
+          { event:'INSERT', schema:'public', table:'songs', filter:'room_code=eq.'+code },
+          p => { Room.mergeSong(Song.fromRow(p.new), true); })
+      .on('postgres_changes',
+          { event:'UPDATE', schema:'public', table:'songs', filter:'room_code=eq.'+code },
+          p => { Room.mergeSong(Song.fromRow(p.new), false); })
+      .on('postgres_changes',
+          { event:'DELETE', schema:'public', table:'songs', filter:'room_code=eq.'+code },
+          p => { state.songs = state.songs.filter(s=>s.id!==p.old.id); Room.paint(); })
+      .on('postgres_changes',
+          { event:'INSERT', schema:'public', table:'vibes', filter:'room_code=eq.'+code },
+          p => { Room.mergeVibe(Vibe.fromRow(p.new)); })
+      .subscribe();
+  },
+
+  unsubscribe(){ if(sb && chan){ sb.removeChannel(chan); chan=null; } }
+};
+
+/* ------------------------------------------------------------ 4. entities */
+const Song = {
+  fromRow: r => ({ id:r.id, title:r.title, votes:r.votes|0, at:Date.parse(r.created_at)||Date.now() })
+};
+const Vibe = {
+  fromRow: r => ({ id:r.id, value:r.value, at:Date.parse(r.created_at)||Date.now() })
+};
+
+/* -------------------------------------------------------------- 5. on-device
+   BroadcastChannel keeps tabs on one machine in sync when there is no cloud,
+   so the room is demoable before credentials exist. */
+const Bus = {
+  boot(){
+    if(typeof BroadcastChannel === 'undefined') return;
+    bus = new BroadcastChannel('partypulse');
+    bus.onmessage = e => {
+      const m = e.data;
+      if(!m || m.code !== state.code) return;
+      if(m.t==='song')  Room.mergeSong(m.song, true);
+      if(m.t==='vote'){ const s=state.songs.find(x=>x.id===m.id); if(s){ s.votes=m.votes; Room.paint(); } }
+      if(m.t==='vibe')  Room.mergeVibe(m.vibe);
+    };
+  },
+  send(msg){ if(bus) bus.postMessage(Object.assign({ code:state.code }, msg)); }
+};
+
+/* ------------------------------------------------------------------ 6. ui */
+const UI = {
+  toast(msg, bad){
+    const el=document.createElement('div');
+    el.className='toast'+(bad?' toast--bad':'');
+    el.textContent=msg;
+    $('#toasts').appendChild(el);
+    setTimeout(()=>{ el.classList.add('toast--out'); setTimeout(()=>el.remove(),220); }, 2200);
+  },
+
+  netBadge(){
+    $('#net-dot').className = 'dot' + (state.cloud?' dot--on':'');
+    $('#net-label').textContent = state.cloud ? 'CLOUD' : 'LOCAL';
+    $('#net-note').textContent = state.cloud
+      ? 'Connected. Rooms sync across every device on the internet in real time.'
+      : 'On-device mode: tabs on this machine stay in sync. Add Supabase credentials for phone-to-phone sync.';
+  },
+
+  async copy(text, msg){
+    try{
+      if(navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+      else {
+        const t=document.createElement('textarea');
+        t.value=text; t.style.cssText='position:fixed;opacity:0';
+        document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+      }
+      UI.toast(msg);
+    }catch(e){ UI.toast('Copy failed', true); }
+  },
+
+  err(node, msg){
+    if(!msg){ node.hidden=true; node.textContent=''; return; }
+    node.hidden=false; node.textContent=msg;
+  },
+
+  ripple(btn, ev){
+    const r=btn.getBoundingClientRect();
+    const d=Math.max(r.width,r.height);
+    const el=document.createElement('span');
+    el.className='rip';
+    el.style.cssText=`width:${d}px;height:${d}px;left:${(ev.clientX||r.left+r.width/2)-r.left-d/2}px;top:${(ev.clientY||r.top+r.height/2)-r.top-d/2}px`;
+    btn.appendChild(el);
+    setTimeout(()=>el.remove(),580);
+  },
+
+  mark(text, color, el){
+    const r=el.getBoundingClientRect();
+    const m=document.createElement('span');
+    m.className='mark'; m.textContent=text;
+    m.style.cssText=`left:${r.left+r.width/2}px;top:${r.top}px;color:${color};--dx:${(Math.random()-.5)*70}px`;
+    document.body.appendChild(m);
+    setTimeout(()=>m.remove(),1000);
+  }
+};
+
+/* --------------------------------------------------------------- 7. entry */
+const Entry = {
+  boot(){
+    const slots=$$('#code-slots .slot');
+
+    slots.forEach((el,i)=>{
+      el.addEventListener('input',()=>{
+        el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
+        el.classList.toggle('slot--filled', !!el.value);
+        UI.err($('#entry-err'), '');
+        if(el.value && i<slots.length-1) slots[i+1].focus();
+      });
+      el.addEventListener('keydown',e=>{
+        if(e.key==='Backspace' && !el.value && i>0){ slots[i-1].focus(); slots[i-1].value=''; slots[i-1].classList.remove('slot--filled'); }
+        if(e.key==='ArrowLeft'  && i>0) slots[i-1].focus();
+        if(e.key==='ArrowRight' && i<slots.length-1) slots[i+1].focus();
+      });
+      el.addEventListener('paste',e=>{
         e.preventDefault();
-        AudioFX.tap();
-        LandingController.handleJoinRoom();
+        const txt=(e.clipboardData.getData('text')||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
+        slots.forEach((s,j)=>{ s.value=txt[j]||''; s.classList.toggle('slot--filled',!!s.value); });
+        slots[Math.min(txt.length,3)].focus();
       });
+    });
 
-      LandingController.renderRecentRooms();
-    },
+    $('#btn-create').addEventListener('click', Entry.create);
+    $('#form-join').addEventListener('submit', e=>{ e.preventDefault(); Entry.join(); });
 
-    showError(msg) {
-      landing.errorMsg.textContent = msg;
-      landing.errorMsg.classList.remove('hidden');
-    },
+    const openNet=()=>{ $('#in-url').value=ls.raw(K.url); $('#in-key').value=ls.raw(K.key); $('#sheet-net').hidden=false; };
+    $('#net-tag').addEventListener('click', openNet);
+    $('#net-tag').addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openNet(); } });
 
-    hideError() {
-      landing.errorMsg.textContent = '';
-      landing.errorMsg.classList.add('hidden');
-    },
+    Entry.recents();
+  },
 
-    setCreateLoading(isLoading) {
-      if (isLoading) {
-        landing.btnCreate.disabled = true;
-        landing.btnCreateText.textContent = 'Generating Room...';
-        landing.btnCreateSpinner.classList.remove('hidden');
-      } else {
-        landing.btnCreate.disabled = false;
-        landing.btnCreateText.textContent = 'Create Party Room';
-        landing.btnCreateSpinner.classList.add('hidden');
+  code(){ return $$('#code-slots .slot').map(s=>s.value).join(''); },
+
+  clear(){ $$('#code-slots .slot').forEach(s=>{ s.value=''; s.classList.remove('slot--filled'); }); },
+
+  reject(msg){
+    UI.err($('#entry-err'), msg);
+    const f=$('#form-join');
+    f.classList.remove('joiner--shake'); void f.offsetWidth; f.classList.add('joiner--shake');
+  },
+
+  gen(){
+    const A='ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I/O — misread on a projector
+    let c=''; for(let i=0;i<4;i++) c+=A[Math.floor(Math.random()*A.length)];
+    return c;
+  },
+
+  async create(){
+    const btn=$('#btn-create');
+    btn.disabled=true; $('.cta__label').textContent='Opening…'; $('#cta-load').hidden=false;
+    try{
+      let code=Entry.gen(), guard=0;
+      const known=ls.get(K.rooms,[]);
+      while(guard++<40){
+        let taken = known.indexOf(code)>-1;
+        if(!taken && sb){ try{ taken = await Cloud.roomExists(code); }catch(e){} }
+        if(!taken) break;
+        code=Entry.gen();
       }
-    },
+      if(sb) await Cloud.createRoom(code);
+      ls.set(K.rooms, known.concat([code]));
+      Rooms.remember(code);
+      location.hash = code;
+      UI.toast('Room '+code+' is open');
+    } finally {
+      btn.disabled=false; $('.cta__label').textContent='Start a room'; $('#cta-load').hidden=true;
+    }
+  },
 
-    handleCreateRoom() {
-      LandingController.hideError();
-      LandingController.setCreateLoading(true);
+  async join(){
+    const code=Entry.code();
+    if(code.length<4) return Entry.reject('Enter all four letters of the room code.');
 
-      setTimeout(() => {
-        let code = generateRandomRoomCode();
-        while (Storage.roomExists(code)) {
-          code = generateRandomRoomCode();
-        }
+    let ok = ls.get(K.rooms,[]).indexOf(code)>-1;
+    if(!ok && sb){
+      try{ ok = await Cloud.roomExists(code); }
+      catch(e){ return Entry.reject('Could not reach the server. Check the connection settings.'); }
+      if(ok) ls.set(K.rooms, ls.get(K.rooms,[]).concat([code]));
+    }
+    if(!ok) return Entry.reject('No room named '+code+'. Check the code, or start your own.');
 
-        const roomObj = Storage.createRoom(code);
-        LandingController.setCreateLoading(false);
-        AudioFX.fanfare();
-        AppRouter.navigateToRoom(roomObj.code);
-        showToast(`Party Room "${roomObj.code}" ignited! 🚀`, 'success');
-      }, 220);
-    },
+    Rooms.remember(code);
+    Entry.clear();
+    UI.err($('#entry-err'),'');
+    location.hash = code;
+  },
 
-    async handleJoinRoom() {
-      const code = landing.inputCode.value.trim().toUpperCase();
-      if (!code) {
-        LandingController.showError('Please enter a 4-letter room code.');
-        landing.inputCode.focus();
-        return;
+  recents(){
+    const list = ls.get(K.recent,[]);
+    const wrap=$('#recents'), row=$('#recents-row');
+    if(!list.length){ wrap.hidden=true; return; }
+    row.innerHTML='';
+    list.forEach(c=>{
+      const b=document.createElement('button');
+      b.type='button'; b.textContent=c;
+      b.addEventListener('click',()=>{ location.hash=c; });
+      row.appendChild(b);
+    });
+    wrap.hidden=false;
+  }
+};
+
+const Rooms = {
+  remember(code){
+    const list=ls.get(K.recent,[]).filter(c=>c!==code);
+    list.unshift(code);
+    ls.set(K.recent, list.slice(0,5));
+  }
+};
+
+/* ---------------------------------------------------------------- 8. room */
+const Room = {
+  boot(){
+    $('#btn-leave').addEventListener('click',()=>{ location.hash=''; });
+    $('#btn-code').addEventListener('click',()=>UI.copy(state.code,'Code '+state.code+' copied'));
+
+    $('#btn-share').addEventListener('click',()=>{
+      $('#share-code').textContent = state.code;
+      $('#qr').innerHTML = QR.svg(Room.link());
+      $('#sheet-share').hidden=false;
+    });
+    $('#btn-share-x').addEventListener('click',()=>{ $('#sheet-share').hidden=true; });
+    $('#btn-copy-link').addEventListener('click',()=>UI.copy(Room.link(),'Join link copied'));
+
+    $('#form-song').addEventListener('submit',e=>{ e.preventDefault(); Room.addSong(); });
+    $('#song-in').addEventListener('input',()=>UI.err($('#song-err'),''));
+
+    $('#btn-fire').addEventListener('click',  e=>Room.vibe('fire',  e));
+    $('#btn-sleepy').addEventListener('click',e=>Room.vibe('sleepy',e));
+
+    $('#btn-recap').addEventListener('click', Room.recap);
+  },
+
+  link(){ return location.origin + location.pathname + '#' + state.code; },
+
+  async enter(code){
+    state.code = code;
+    state.songs = []; state.vibes = [];
+    $('#room-code').textContent = code;
+    $('#song-in').value=''; UI.err($('#song-err'),'');
+
+    let loaded=false;
+    if(sb){ try{ loaded = await Cloud.load(code); }catch(e){} Cloud.subscribe(code); }
+    if(!loaded){
+      state.songs = ls.get(K.songs(code),[]);
+      state.vibes = ls.get(K.vibes(code),[]);
+    }
+
+    Room.paint();
+    clearInterval(tick);
+    tick = setInterval(Room.paintEnergy, TICK_MS);
+  },
+
+  leave(){
+    state.code=null; state.songs=[]; state.vibes=[];
+    Cloud.unsubscribe();
+    clearInterval(tick); tick=null;
+  },
+
+  persist(){
+    if(!state.code) return;
+    ls.set(K.songs(state.code), state.songs);
+    ls.set(K.vibes(state.code), state.vibes.filter(v=>v.at >= Date.now()-WINDOW_MS*2));
+  },
+
+  /* ---- mutations ---- */
+  async addSong(){
+    const input=$('#song-in');
+    const title=input.value.trim().replace(/\s+/g,' ');
+    if(!title) return UI.err($('#song-err'),'Type a track or artist first.');
+    if(state.songs.some(s=>s.title.toLowerCase()===title.toLowerCase()))
+      return UI.err($('#song-err'),'Already in the queue — upvote it instead.');
+
+    const song={ id:uid(), title, votes:0, at:Date.now() };
+    input.value=''; UI.err($('#song-err'),'');
+
+    Room.mergeSong(song, true);
+    Bus.send({ t:'song', song });
+    if(sb){
+      const { error } = await sb.from('songs').insert({
+        id:song.id, room_code:state.code, title:song.title, votes:0
+      });
+      if(error){
+        state.songs = state.songs.filter(s=>s.id!==song.id);
+        Room.paint();
+        UI.err($('#song-err'),'Could not save that request. Try again.');
       }
+    }
+  },
 
-      if (code.length < 4) {
-        LandingController.showError('Room code must be 4 characters long.');
-        landing.inputCode.focus();
-        return;
-      }
+  async vote(id, btn){
+    const song=state.songs.find(s=>s.id===id);
+    if(!song) return;
 
-      // Check local storage or cloud
-      let exists = Storage.roomExists(code);
-      if (!exists && supabaseClient) {
-        try {
-          const { data } = await supabaseClient.from('rooms').select('code').eq('code', code).single();
-          if (data && data.code) {
-            exists = true;
-            Storage.createRoom(code);
-          }
-        } catch (e) {}
-      }
+    song.votes++;
+    btn.classList.add('up--hit');
+    const n=btn.querySelector('.up__n');
+    n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop');
+    UI.mark('+1', 'var(--acid)', btn);
 
-      if (!exists) {
-        LandingController.showError(`Room "${code}" not found. Check the code or create a new room.`);
-        return;
-      }
+    Room.say('+1 · '+song.title);
+    Room.paint();
+    Room.persist();
+    Bus.send({ t:'vote', id, votes:song.votes });
 
-      Storage.addRecentRoom(code);
-      LandingController.hideError();
-      landing.inputCode.value = '';
-      AudioFX.vote();
-      AppRouter.navigateToRoom(code);
-      showToast(`Joined party "${code}"! 🎉`, 'success');
-    },
+    if(sb){
+      // Atomic where available so simultaneous voters never clobber each other.
+      const rpc = await sb.rpc('bump_vote', { song_id:id });
+      if(rpc.error) await sb.from('songs').update({ votes:song.votes }).eq('id',id);
+    }
+  },
 
-    renderRecentRooms() {
-      const recents = Storage.getRecentRooms().filter((code) => Storage.roomExists(code));
-      if (recents.length === 0) {
-        landing.recentSection.classList.add('hidden');
-        return;
-      }
+  async vibe(value, ev){
+    if(!state.code) return;
+    const btn = ev.currentTarget;
+    UI.ripple(btn, ev);
+    UI.mark(value==='fire'?'FIRE':'CHILL', value==='fire'?'var(--fire)':'var(--chill)', btn);
 
-      landing.recentList.innerHTML = '';
-      recents.forEach((code) => {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'recent-room-chip';
-        chip.innerHTML = `<span>🔥</span> ${code}`;
-        chip.addEventListener('click', () => {
-          AudioFX.tap();
-          AppRouter.navigateToRoom(code);
-        });
-        landing.recentList.appendChild(chip);
-      });
+    const v={ id:uid(), value, at:Date.now() };
+    Room.mergeVibe(v);
+    Bus.send({ t:'vibe', vibe:v });
 
-      landing.recentSection.classList.remove('hidden');
-    },
-  };
+    if(sb) await sb.from('vibes').insert({ id:v.id, room_code:state.code, value });
+  },
 
-  // =========================================================================
-  // 6. Room View Controller
-  // =========================================================================
-  const RoomController = {
-    init() {
-      // Tap to Copy Room Code
-      room.btnCopyCode.addEventListener('click', () => {
-        AudioFX.tap();
-        if (!currentRoomCode) return;
-        RoomController.copyText(currentRoomCode, `Room code "${currentRoomCode}" copied! 📋`);
-      });
+  /* ---- merges from any transport ---- */
+  mergeSong(song, isNew){
+    const i=state.songs.findIndex(s=>s.id===song.id);
+    if(i<0){
+      state.songs.push(song);
+      if(isNew) Room.say('added · '+song.title);
+    } else {
+      state.songs[i].votes = song.votes;
+      state.songs[i].title = song.title;
+    }
+    Room.paint();
+    Room.persist();
+  },
 
-      // Leave Room
-      room.btnLeave.addEventListener('click', () => {
-        AudioFX.tap();
-        AppRouter.navigateToLanding();
-      });
+  mergeVibe(v){
+    if(state.vibes.some(x=>x.id===v.id)) return;
+    state.vibes.push(v);
+    Room.paintEnergy();
+    Room.persist();
+  },
 
-      // Show QR Code Projector Modal
-      room.btnShowQR.addEventListener('click', () => {
-        AudioFX.tap();
-        ModalController.openQR();
-      });
+  say(text){
+    const t=$('#ticker');
+    t.textContent=text;
+    t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash');
+  },
 
-      // Vibe Tap Buttons
-      room.btnVibeFire.addEventListener('click', (e) => {
-        RoomController.handleVibeTap('fire', e);
-      });
+  /* ---- render ---- */
+  paint(){ Room.paintQueue(); Room.paintEnergy(); },
 
-      room.btnVibeSleepy.addEventListener('click', (e) => {
-        RoomController.handleVibeTap('sleepy', e);
-      });
+  paintEnergy(){
+    const cut = Date.now()-WINDOW_MS;
+    state.vibes = state.vibes.filter(v=>v.at>=cut);
 
-      // Quick Reaction Buttons
-      document.querySelectorAll('.btn-reaction').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          const emoji = btn.dataset.emoji || '🎉';
-          AudioFX.playTone(800, 'triangle', 0.1, 0.08);
-          RoomController.spawnFloatingParticle(emoji, e.currentTarget);
-          SyncEngine.broadcast({ type: 'REACTION', roomCode: currentRoomCode, emoji });
-        });
-      });
+    let fire=0, sleepy=0;
+    state.vibes.forEach(v=>{ if(v.value==='fire') fire++; else sleepy++; });
+    const total=fire+sleepy;
+    const pct = total ? Math.round(fire/total*100) : 50;
 
-      // Add Song Form Submit
-      room.formAddSong.addEventListener('submit', (e) => {
-        e.preventDefault();
-        RoomController.handleAddSong();
-      });
+    $('#count-fire').textContent=fire;
+    $('#count-sleepy').textContent=sleepy;
+    $('#energy-num').textContent=pct;
+    $('#gauge-fill').style.width=pct+'%';
+    $('#gauge-pin').style.left=pct+'%';
 
-      // Clear input error on typing
-      room.inputSongTitle.addEventListener('input', () => {
-        RoomController.hideSongError();
-      });
-    },
+    // Drive the ambient field: cool blue when chill, hot red when raging.
+    const e = pct/100;
+    const hue = Math.round(220 - e*208);
+    document.documentElement.style.setProperty('--e', e.toFixed(3));
+    document.documentElement.style.setProperty('--e-hue', hue);
 
-    copyText(text, successMsg) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-          showToast(successMsg, 'success');
-        }).catch(() => {
-          RoomController.fallbackCopy(text, successMsg);
-        });
-      } else {
-        RoomController.fallbackCopy(text, successMsg);
-      }
-    },
+    $('#energy-verdict').textContent =
+      !total       ? 'Waiting on the crowd' :
+      pct>=80      ? 'Room is going off' :
+      pct>=60      ? 'Riding high' :
+      pct>=40      ? 'Holding steady' :
+      pct>=20      ? 'Losing them' :
+                     'Drop something now';
+  },
 
-    fallbackCopy(text, msg) {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand('copy');
-        showToast(msg, 'success');
-      } catch (err) {
-        showToast(`Code is: ${text}`, 'info');
-      }
-      document.body.removeChild(textarea);
-    },
+  paintQueue(){
+    const list=$('#list'), voidEl=$('#void');
 
-    async enterRoom(code) {
-      currentRoomCode = code.toUpperCase();
-      room.displayCode.textContent = currentRoomCode;
-      RoomController.hideSongError();
-      room.inputSongTitle.value = '';
+    // FLIP: capture geometry so re-ranked rows visibly slide past each other.
+    const before=new Map();
+    $$('#list .row').forEach(r=>before.set(r.dataset.id, r.getBoundingClientRect().top));
 
-      // Realtime Cloud Subscription
-      CloudEngine.subscribeToRoom(currentRoomCode);
-      await CloudEngine.fetchAndSyncSongs(currentRoomCode);
-      await CloudEngine.fetchAndSyncVibes(currentRoomCode);
+    const songs=state.songs.slice().sort((a,b)=> b.votes-a.votes || a.at-b.at );
 
-      RoomController.renderVibes();
-      RoomController.renderSongs();
+    $('#queue-n').textContent = songs.length + (songs.length===1?' track':' tracks');
+    voidEl.hidden = songs.length>0;
+    list.hidden   = songs.length===0;
+    list.innerHTML='';
 
-      // Start rolling decay timer for vibes
-      if (vibeDecayTimer) clearInterval(vibeDecayTimer);
-      vibeDecayTimer = setInterval(() => {
-        RoomController.renderVibes();
-      }, VIBE_TICK_INTERVAL_MS);
-    },
+    songs.forEach((s,i)=>{
+      const li=document.createElement('li');
+      li.className='row'+(i===0?' row--lead':'');
+      li.dataset.id=s.id;
 
-    leaveRoom() {
-      currentRoomCode = null;
-      if (vibeDecayTimer) {
-        clearInterval(vibeDecayTimer);
-        vibeDecayTimer = null;
-      }
-    },
+      const rank=document.createElement('span');
+      rank.className='row__rank'; rank.textContent=String(i+1).padStart(2,'0');
 
-    // --- Vibe Logic ---
-    handleVibeTap(vibeType, event) {
-      if (!currentRoomCode) return;
-
-      if (vibeType === 'fire') {
-        AudioFX.fire();
-      } else {
-        AudioFX.sleepy();
-      }
-
-      const newVibe = {
-        id: 'v_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-        roomCode: currentRoomCode,
-        value: vibeType,
-        timestamp: Date.now(),
-      };
-
-      const vibes = Storage.getVibes(currentRoomCode);
-      vibes.push(newVibe);
-
-      // Clean up vibes older than 10 mins from storage
-      const cutoff = Date.now() - 10 * 60 * 1000;
-      const prunedVibes = vibes.filter((v) => v.timestamp >= cutoff);
-      Storage.saveVibes(currentRoomCode, prunedVibes);
-
-      // Cloud & Broadcast sync
-      CloudEngine.syncAddVibe(newVibe);
-      SyncEngine.broadcast({
-        type: 'VIBE_TAPPED',
-        roomCode: currentRoomCode,
-        vibe: newVibe,
-      });
-
-      // Spawn visual particle
-      RoomController.spawnFloatingParticle(vibeType === 'fire' ? '🔥' : '😴', event.currentTarget);
-
-      RoomController.renderVibes();
-    },
-
-    spawnFloatingParticle(emoji, targetBtn) {
-      const particle = document.createElement('span');
-      particle.className = 'floating-particle';
-      particle.textContent = emoji;
-
-      const randomX = (Math.random() - 0.5) * 80;
-      const randomRot = (Math.random() - 0.5) * 40;
-      particle.style.setProperty('--rnd-x', `${randomX}px`);
-      particle.style.setProperty('--rnd-rot', `${randomRot}deg`);
-
-      if (targetBtn) {
-        const rect = targetBtn.getBoundingClientRect();
-        particle.style.left = `${rect.left + rect.width / 2}px`;
-        particle.style.top = `${rect.top}px`;
-      } else {
-        particle.style.left = `${window.innerWidth / 2 + (Math.random() - 0.5) * 120}px`;
-        particle.style.top = `${window.innerHeight * 0.6}px`;
-      }
-
-      document.body.appendChild(particle);
-
-      setTimeout(() => {
-        if (particle.parentNode) {
-          particle.parentNode.removeChild(particle);
-        }
-      }, 1100);
-    },
-
-    renderVibes() {
-      if (!currentRoomCode) return;
-
-      const vibes = Storage.getVibes(currentRoomCode);
-      const now = Date.now();
-      const windowStart = now - VIBE_WINDOW_MS;
-
-      // Rolling 5-minute window filter
-      const recentVibes = vibes.filter((v) => v.timestamp >= windowStart);
-
-      let fireCount = 0;
-      let sleepyCount = 0;
-
-      recentVibes.forEach((v) => {
-        if (v.value === 'fire') fireCount++;
-        else if (v.value === 'sleepy') sleepyCount++;
-      });
-
-      room.countFire.textContent = fireCount;
-      room.countSleepy.textContent = sleepyCount;
-
-      const total = fireCount + sleepyCount;
-      let firePercentage = 50;
-
-      if (total > 0) {
-        firePercentage = Math.round((fireCount / total) * 100);
+      const body=document.createElement('div');
+      body.className='row__body';
+      const title=document.createElement('span');
+      title.className='row__title'; title.textContent=s.title; title.title=s.title;
+      body.appendChild(title);
+      if(i===0){
+        const sub=document.createElement('span');
+        sub.className='row__sub';
+        sub.innerHTML='<span class="eq"><i></i><i></i><i></i></span>Next up';
+        body.appendChild(sub);
       }
 
-      room.barFill.style.width = `${firePercentage}%`;
-      room.pctText.textContent = `${firePercentage}% Energy`;
-
-      // Status text
-      if (total === 0) {
-        room.statusText.textContent = 'Party warming up...';
-      } else if (firePercentage >= 70) {
-        room.statusText.textContent = 'RAGING FIRE! 🔥🔥🔥';
-      } else if (firePercentage <= 30) {
-        room.statusText.textContent = 'Sleepy crowd, cue the drops! 😴';
-      } else {
-        room.statusText.textContent = 'Good vibes flowing! ✨';
-      }
-    },
-
-    // --- Song Queue Logic ---
-    showSongError(msg) {
-      room.songErrorMsg.textContent = msg;
-      room.songErrorMsg.classList.remove('hidden');
-    },
-
-    hideSongError() {
-      room.songErrorMsg.textContent = '';
-      room.songErrorMsg.classList.add('hidden');
-    },
-
-    handleAddSong() {
-      if (!currentRoomCode) return;
-
-      const title = room.inputSongTitle.value.trim();
-      if (!title) {
-        RoomController.showSongError('Please enter a track name or artist.');
-        room.inputSongTitle.focus();
-        return;
-      }
-
-      RoomController.hideSongError();
-
-      const newSong = {
-        id: 's_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-        roomCode: currentRoomCode,
-        title: title,
-        votes: 0,
-        createdAt: Date.now(),
-      };
-
-      const songs = Storage.getSongs(currentRoomCode);
-      songs.push(newSong);
-      Storage.saveSongs(currentRoomCode, songs);
-
-      room.inputSongTitle.value = '';
-
-      // Cloud & Broadcast sync
-      CloudEngine.syncAddSong(newSong);
-      SyncEngine.broadcast({
-        type: 'SONG_ADDED',
-        roomCode: currentRoomCode,
-        song: newSong,
-      });
-
-      AudioFX.vote();
-      RoomController.renderSongs();
-      showToast(`Added "${title}" to live queue! 🎶`, 'success');
-    },
-
-    handleVote(songId, buttonEl) {
-      if (!currentRoomCode || !songId) return;
-
-      AudioFX.vote();
-
-      const songs = Storage.getSongs(currentRoomCode);
-      const song = songs.find((s) => s.id === songId);
-      if (!song) return;
-
-      song.votes = (song.votes || 0) + 1;
-      Storage.saveSongs(currentRoomCode, songs);
-
-      // Micro-animation
-      if (buttonEl) {
-        buttonEl.classList.add('voted');
-        const countSpan = buttonEl.querySelector('.vote-count');
-        if (countSpan) {
-          countSpan.classList.add('vote-pop');
-          setTimeout(() => countSpan.classList.remove('vote-pop'), 350);
-        }
-      }
-
-      // Cloud & Broadcast sync
-      CloudEngine.syncVoteSong(songId, currentRoomCode, song.votes);
-      SyncEngine.broadcast({
-        type: 'SONG_VOTED',
-        roomCode: currentRoomCode,
-        songId: songId,
-        votes: song.votes,
-      });
-
-      RoomController.renderSongs();
-    },
-
-    renderSongs() {
-      if (!currentRoomCode) return;
-
-      const songs = Storage.getSongs(currentRoomCode);
-
-      // Sort descending votes, tie-broken by creation time
-      songs.sort((a, b) => {
-        if (b.votes !== a.votes) {
-          return b.votes - a.votes;
-        }
-        return a.createdAt - b.createdAt;
-      });
-
-      const count = songs.length;
-      room.songCountBadge.textContent = `${count} ${count === 1 ? 'track' : 'tracks'}`;
-
-      if (count === 0) {
-        room.emptyState.classList.remove('hidden');
-        room.songList.classList.add('hidden');
-        room.songList.innerHTML = '';
-        return;
-      }
-
-      room.emptyState.classList.add('hidden');
-      room.songList.classList.remove('hidden');
-
-      room.songList.innerHTML = '';
-
-      songs.forEach((song, index) => {
-        const li = document.createElement('li');
-        li.className = 'song-item';
-        li.dataset.id = song.id;
-
-        // Info container
-        const infoDiv = document.createElement('div');
-        infoDiv.className = 'song-info';
-
-        const rankBadge = document.createElement('div');
-        rankBadge.className = 'song-rank-badge';
-        rankBadge.textContent = `#${index + 1}`;
-
-        const metaDiv = document.createElement('div');
-        metaDiv.className = 'song-meta';
-
-        const titleSpan = document.createElement('span');
-        titleSpan.className = 'song-title';
-        titleSpan.textContent = song.title;
-        titleSpan.title = song.title;
-
-        metaDiv.appendChild(titleSpan);
-
-        // Add animated sound equalizer to #1 track
-        if (index === 0 && count > 0) {
-          const eqDiv = document.createElement('div');
-          eqDiv.className = 'equalizer-wave';
-          eqDiv.innerHTML = '<div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div>';
-          metaDiv.appendChild(eqDiv);
-        }
-
-        infoDiv.appendChild(rankBadge);
-        infoDiv.appendChild(metaDiv);
-
-        // Upvote button
-        const upvoteBtn = document.createElement('button');
-        upvoteBtn.type = 'button';
-        upvoteBtn.className = 'btn-upvote';
-        upvoteBtn.setAttribute('aria-label', `Upvote ${song.title}, currently ${song.votes} votes`);
-
-        const iconSpan = document.createElement('span');
-        iconSpan.className = 'upvote-icon';
-        iconSpan.textContent = '▲';
-
-        const countSpan = document.createElement('span');
-        countSpan.className = 'vote-count';
-        countSpan.textContent = song.votes;
-
-        upvoteBtn.appendChild(iconSpan);
-        upvoteBtn.appendChild(countSpan);
-
-        upvoteBtn.addEventListener('click', () => {
-          RoomController.handleVote(song.id, upvoteBtn);
-        });
-
-        li.appendChild(infoDiv);
-        li.appendChild(upvoteBtn);
-        room.songList.appendChild(li);
-      });
-    },
-  };
-
-  // =========================================================================
-  // 7. Modals (QR Code, Pitch Deck, & Supabase Cloud Setup)
-  // =========================================================================
-  const ModalController = {
-    init() {
-      // Sound Toggle
-      topNav.btnSound.addEventListener('click', () => {
-        soundEnabled = !soundEnabled;
-        localStorage.setItem(STORAGE_KEYS.SOUND_ENABLED, String(soundEnabled));
-        topNav.soundIcon.textContent = soundEnabled ? '🔊' : '🔇';
-        if (soundEnabled) AudioFX.tap();
-        showToast(soundEnabled ? 'Sound FX Enabled 🔊' : 'Sound FX Muted 🔇', 'info');
-      });
-
-      // Restore sound setting
-      const savedSound = localStorage.getItem(STORAGE_KEYS.SOUND_ENABLED);
-      if (savedSound !== null) {
-        soundEnabled = savedSound === 'true';
-        topNav.soundIcon.textContent = soundEnabled ? '🔊' : '🔇';
-      }
-
-      // Open Cloud Modal
-      topNav.btnCloudModal.addEventListener('click', () => {
-        AudioFX.tap();
-        ModalController.openCloud();
-      });
-
-      // Open Pitch Modal
-      if (topNav.btnPitchModal) {
-        topNav.btnPitchModal.addEventListener('click', () => {
-          AudioFX.tap();
-          ModalController.openPitch();
-        });
-      }
-
-      // Close Modals
-      modals.btnCloseQR.addEventListener('click', () => modals.qr.classList.add('hidden'));
-      modals.btnCloseCloud.addEventListener('click', () => modals.cloud.classList.add('hidden'));
-      if (modals.btnClosePitch) {
-        modals.btnClosePitch.addEventListener('click', () => modals.pitch.classList.add('hidden'));
-      }
-
-      // Pitch Deck Tabs Switcher
-      document.querySelectorAll('.pitch-tab').forEach((tabBtn) => {
-        tabBtn.addEventListener('click', () => {
-          AudioFX.tap();
-          const targetTab = tabBtn.dataset.tab;
-          document.querySelectorAll('.pitch-tab').forEach((b) => b.classList.remove('active'));
-          document.querySelectorAll('.pitch-tab-pane').forEach((p) => p.classList.add('hidden'));
-
-          tabBtn.classList.add('active');
-          const pane = document.getElementById(targetTab);
-          if (pane) pane.classList.remove('hidden');
-        });
-      });
-
-      // Viral Host Party CTA
-      const btnViral = document.getElementById('btn-viral-create');
-      if (btnViral) {
-        btnViral.addEventListener('click', () => {
-          AudioFX.tap();
-          AppRouter.navigateToLanding();
-          setTimeout(() => {
-            LandingController.handleCreateRoom();
-          }, 150);
-        });
-      }
-
-      // Export Tracklist & Recap
-      const btnExport = document.getElementById('btn-export-recap');
-      if (btnExport) {
-        btnExport.addEventListener('click', () => {
-          if (!currentRoomCode) return;
-          AudioFX.vote();
-          const songs = Storage.getSongs(currentRoomCode);
-          songs.sort((a, b) => (b.votes - a.votes) || (a.createdAt - b.createdAt));
-
-          const vibes = Storage.getVibes(currentRoomCode);
-          const fireCount = vibes.filter((v) => v.value === 'fire').length;
-          const sleepyCount = vibes.filter((v) => v.value === 'sleepy').length;
-
-          let recap = `🎉 PartyPulse Live Recap — Room [${currentRoomCode}]\n`;
-          recap += `🌡️ Crowd Temperature: ${fireCount} 🔥 / ${sleepyCount} 😴\n\n`;
-          recap += `🎵 Top Voted Tracks:\n`;
-
-          if (songs.length === 0) {
-            recap += `(No tracks requested yet)\n`;
-          } else {
-            songs.forEach((s, idx) => {
-              recap += `${idx + 1}. ${s.title} — ${s.votes} votes\n`;
-            });
-          }
-
-          recap += `\nGenerated live with PartyPulse PRO ✨`;
-          RoomController.copyText(recap, 'Party tracklist & recap copied to clipboard! 📋');
-        });
-      }
-
-      // Copy Share Link in QR modal
-      modals.btnCopyShareLink.addEventListener('click', () => {
-        AudioFX.tap();
-        const shareUrl = window.location.origin + window.location.pathname + '#' + currentRoomCode;
-        RoomController.copyText(shareUrl, 'Party share link copied to clipboard! 🔗');
-      });
-
-      // Save Supabase Config
-      modals.formCloud.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const url = modals.inputSbUrl.value.trim();
-        const key = modals.inputSbKey.value.trim();
-
-        if (url && key) {
-          localStorage.setItem(STORAGE_KEYS.SB_URL, url);
-          localStorage.setItem(STORAGE_KEYS.SB_KEY, key);
-          CloudEngine.init();
-          if (currentRoomCode) {
-            CloudEngine.subscribeToRoom(currentRoomCode);
-          }
-          AudioFX.fanfare();
-          showToast('Supabase Cloud connected successfully! 🚀', 'success');
-          modals.cloud.classList.add('hidden');
-        } else {
-          showToast('Please enter both Supabase URL and Key', 'error');
-        }
-      });
-
-      // Clear / Reset Cloud Config
-      modals.btnClearCloud.addEventListener('click', () => {
-        localStorage.removeItem(STORAGE_KEYS.SB_URL);
-        localStorage.removeItem(STORAGE_KEYS.SB_KEY);
-        modals.inputSbUrl.value = '';
-        modals.inputSbKey.value = '';
-        supabaseClient = null;
-        isCloudConnected = false;
-        CloudEngine.updateNavStatus(false);
-        showToast('Reset to local multi-tab mode 🟡', 'info');
-        modals.cloud.classList.add('hidden');
-      });
-
-      // Copy SQL Schema
-      modals.btnCopySql.addEventListener('click', () => {
-        const sqlCode = document.querySelector('.sql-code-box code').textContent;
-        RoomController.copyText(sqlCode, 'Supabase SQL schema copied to clipboard! 📋');
-      });
-
-      // Close on background click
-      [modals.qr, modals.cloud, modals.pitch].forEach((overlay) => {
-        if (!overlay) return;
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) {
-            overlay.classList.add('hidden');
-          }
-        });
-      });
-    },
-
-    openQR() {
-      if (!currentRoomCode) return;
-      modals.qrDisplayCode.textContent = currentRoomCode;
-      const shareUrl = window.location.origin + window.location.pathname + '#' + currentRoomCode;
-      modals.qrSvg.innerHTML = QRGenerator.generateSVG(shareUrl);
-      modals.qr.classList.remove('hidden');
-    },
-
-    openCloud() {
-      const savedUrl = localStorage.getItem(STORAGE_KEYS.SB_URL) || '';
-      const savedKey = localStorage.getItem(STORAGE_KEYS.SB_KEY) || '';
-      modals.inputSbUrl.value = savedUrl;
-      modals.inputSbKey.value = savedKey;
-      modals.cloud.classList.remove('hidden');
-    },
-
-    openPitch() {
-      if (modals.pitch) {
-        modals.pitch.classList.remove('hidden');
-      }
-    },
-  };
-
-  // =========================================================================
-  // 8. Router & View Management
-  // =========================================================================
-  const AppRouter = {
-    init() {
-      window.addEventListener('hashchange', () => {
-        AppRouter.handleRoute();
-      });
-
-      AppRouter.handleRoute();
-    },
-
-    handleRoute() {
-      const hash = window.location.hash.replace('#', '').trim().toUpperCase();
-      if (hash && hash.length === 4) {
-        if (Storage.roomExists(hash) || isCloudConnected) {
-          AppRouter.showView('room');
-          RoomController.enterRoom(hash);
-        } else {
-          AppRouter.showView('landing');
-          LandingController.showError(`Room "${hash}" not found. Check code or create a new room.`);
-        }
-      } else {
-        AppRouter.showView('landing');
-      }
-    },
-
-    navigateToRoom(code) {
-      window.location.hash = `#${code.toUpperCase()}`;
-    },
-
-    navigateToLanding() {
-      RoomController.leaveRoom();
-      window.location.hash = '';
-      AppRouter.showView('landing');
-      LandingController.renderRecentRooms();
-    },
-
-    showView(viewName) {
-      if (viewName === 'room') {
-        views.landing.classList.add('hidden');
-        views.room.classList.remove('hidden');
-      } else {
-        views.room.classList.add('hidden');
-        views.landing.classList.remove('hidden');
-      }
-    },
-  };
-
-  // =========================================================================
-  // 9. App Bootstrap
-  // =========================================================================
-  document.addEventListener('DOMContentLoaded', () => {
-    CanvasVisualizer.init();
-    CloudEngine.init();
-    SyncEngine.init();
-    ModalController.init();
-    LandingController.init();
-    RoomController.init();
-    AppRouter.init();
+      const up=document.createElement('button');
+      up.type='button'; up.className='up';
+      up.setAttribute('aria-label','Upvote '+s.title+', '+s.votes+' votes');
+      up.innerHTML='<span class="up__arw">▲</span><span class="up__n">'+s.votes+'</span>';
+      up.addEventListener('click',()=>Room.vote(s.id, up));
+
+      li.append(rank, body, up);
+      list.appendChild(li);
+
+      if(!before.has(s.id)) li.classList.add('row--new');
+    });
+
+    $$('#list .row').forEach(r=>{
+      const prev=before.get(r.dataset.id);
+      if(prev===undefined) return;
+      const delta=prev - r.getBoundingClientRect().top;
+      if(!delta) return;
+      r.animate(
+        [{ transform:`translateY(${delta}px)` },{ transform:'none' }],
+        { duration:420, easing:'cubic-bezier(.2,1,.3,1)' }
+      );
+    });
+  },
+
+  recap(){
+    const songs=state.songs.slice().sort((a,b)=> b.votes-a.votes || a.at-b.at );
+    let fire=0, sleepy=0;
+    state.vibes.forEach(v=>{ if(v.value==='fire') fire++; else sleepy++; });
+
+    let out='PartyPulse — room '+state.code+'\n';
+    out+='Energy: '+(fire+sleepy ? Math.round(fire/(fire+sleepy)*100) : 50)+'% ('+fire+' fire / '+sleepy+' sleepy)\n\n';
+    out+= songs.length ? songs.map((s,i)=>(i+1)+'. '+s.title+' — '+s.votes+' votes').join('\n')
+                       : 'No tracks requested.';
+    UI.copy(out,'Set recap copied');
+  }
+};
+
+/* -------------------------------------------------------------- 9. router */
+const Router = {
+  boot(){
+    window.addEventListener('hashchange', Router.go);
+    Router.go();
+  },
+  go(){
+    const code=(location.hash||'').replace('#','').trim().toUpperCase().slice(0,4);
+    const inRoom = /^[A-Z0-9]{4}$/.test(code);
+
+    if(inRoom){
+      $('#screen-entry').hidden=true;  $('#screen-entry').classList.remove('screen--on');
+      $('#screen-room').hidden=false;  $('#screen-room').classList.add('screen--on');
+      Room.enter(code);
+    } else {
+      Room.leave();
+      $('#screen-room').hidden=true;   $('#screen-room').classList.remove('screen--on');
+      $('#screen-entry').hidden=false; $('#screen-entry').classList.add('screen--on');
+      document.documentElement.style.setProperty('--e','.5');
+      document.documentElement.style.setProperty('--e-hue','220');
+      Entry.recents();
+    }
+  }
+};
+
+/* ------------------------------------------------------------- 10. sheets */
+function bootSheets(){
+  $('#btn-net-x').addEventListener('click',()=>{ $('#sheet-net').hidden=true; });
+
+  $('#form-net').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const url=$('#in-url').value.trim(), key=$('#in-key').value.trim();
+    if(!url || !key) return UI.toast('Both fields are required', true);
+    ls.put(K.url,url); ls.put(K.key,key);
+    Cloud.boot();
+    if(!sb) return UI.toast('Those credentials did not load', true);
+    UI.toast('Cloud sync on');
+    $('#sheet-net').hidden=true;
+    if(state.code) await Room.enter(state.code);
   });
+
+  $('#btn-net-clear').addEventListener('click',()=>{
+    ls.del(K.url); ls.del(K.key);
+    $('#in-url').value=''; $('#in-key').value='';
+    Cloud.boot();
+    UI.toast('Back to on-device mode');
+    $('#sheet-net').hidden=true;
+  });
+
+  $('#btn-copy-sql').addEventListener('click', e=>{
+    e.preventDefault(); e.stopPropagation();
+    UI.copy($('#sql-text').textContent,'Schema copied');
+  });
+
+  $$('.sheet').forEach(sh=>sh.addEventListener('click', e=>{ if(e.target===sh) sh.hidden=true; }));
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.sheet').forEach(s=>s.hidden=true); });
+}
+
+/* ---------------------------------------------------------------- 11. boot */
+Cloud.boot();
+Bus.boot();
+bootSheets();
+Entry.boot();
+Room.boot();
+Router.boot();
+
 })();

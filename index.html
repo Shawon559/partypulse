@@ -1,557 +1,230 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PartyPulse PRO — Live Party Engagement</title>
-  <meta name="description" content="Festival-grade live party engagement platform. Real-time song requests, live upvoting, dynamic vibe checks, and Supabase cloud sync.">
-  <meta name="theme-color" content="#070611">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PartyPulse — Make the Party Better</title>
+<meta name="description" content="Live crowd queue and real-time energy meter for any gathering. Scan, request, vote, feel the room.">
+<meta name="theme-color" content="#08080A">
 
-  <!-- Supabase JS Client for Multi-Device Realtime Cloud Sync -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 
-  <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <!-- Dynamic Background Particle Visualizer Canvas -->
-  <canvas id="bg-canvas" class="bg-canvas"></canvas>
-  <div class="ambient-mesh mesh-1"></div>
-  <div class="ambient-mesh mesh-2"></div>
-  <div class="ambient-mesh mesh-3"></div>
 
-  <!-- Toast Notification Container -->
-  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+<!-- Ambient energy field: hue + intensity are driven by live crowd vibe -->
+<div class="pulse-field" id="pulse-field" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
 
-  <!-- Top Global Utility Bar -->
-  <nav class="top-nav">
-    <div class="top-nav-brand">
-      <span class="nav-logo">⚡</span>
-      <span class="nav-title">PartyPulse<span class="pro-tag">PRO</span></span>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- ============================ ENTRY ============================ -->
+<section class="screen screen--on" id="screen-entry">
+  <div class="entry">
+
+    <div class="entry__meta">
+      <span class="tag" id="net-tag" role="button" tabindex="0" title="Connection settings">
+        <i class="dot" id="net-dot"></i><b id="net-label">LOCAL</b>
+      </span>
+      <span class="tag tag--ghost">SEOUL / 서울</span>
     </div>
-    <div class="top-nav-actions">
-      <!-- Pitch Deck & Judge Brief -->
-      <button id="btn-pitch-modal" class="btn-util btn-pitch" type="button" title="View Hackathon Pitch Deck & GTM Strategy" aria-label="Pitch Deck">
-        <span class="util-icon">🏆</span>
-        <span class="pitch-text">Pitch & GTM</span>
-      </button>
 
-      <!-- Audio Toggle -->
-      <button id="btn-sound-toggle" class="btn-util" type="button" title="Toggle Sound FX" aria-label="Toggle Sound">
-        <span id="sound-icon" class="util-icon">🔊</span>
-      </button>
+    <h1 class="poster">
+      <span class="poster__l">MAKE</span>
+      <span class="poster__l">THE <em>PARTY</em></span>
+      <span class="poster__l">BETTER</span>
+    </h1>
 
-      <!-- Cloud Status / Settings -->
-      <button id="btn-cloud-modal" class="btn-util btn-cloud" type="button" title="Supabase Cloud Settings" aria-label="Cloud Settings">
-        <span id="cloud-status-dot" class="status-dot dot-local"></span>
-        <span id="cloud-status-text" class="cloud-text">Local</span>
-      </button>
-    </div>
-  </nav>
+    <p class="entry__lede">
+      The crowd picks the next track. The room shows how it feels.
+      <span>No app. No login. One code.</span>
+    </p>
 
-  <div class="app-container">
-    <!-- LANDING / JOIN VIEW -->
-    <main id="view-landing" class="view view-active">
-      <div class="landing-card card-luxe">
-        <header class="brand-hero">
-          <div class="hero-badge-wrap">
-            <div class="hero-badge">
-              <span class="hero-icon">🔥</span>
-              <div class="badge-ring"></div>
-            </div>
-          </div>
-          <h1 class="hero-title">PartyPulse</h1>
-          <p class="hero-tagline">Make the Party Better</p>
-          <p class="hero-subtext">Live crowd queue, real-time vibe meter, and interactive multi-device sync.</p>
-        </header>
+    <button class="cta" id="btn-create" type="button">
+      <span class="cta__label">Start a room</span>
+      <span class="cta__arw" aria-hidden="true">→</span>
+      <span class="cta__load" id="cta-load" hidden></span>
+    </button>
 
-        <section class="action-section">
-          <button id="btn-create-room" class="btn btn-primary btn-glow btn-block btn-xl" type="button">
-            <span class="btn-icon">⚡</span>
-            <span class="btn-text">Create Party Room</span>
-            <span class="btn-spinner hidden" aria-hidden="true"></span>
-          </button>
+    <div class="rule"><span>or join one</span></div>
 
-          <div class="divider">
-            <span>or enter existing code</span>
-          </div>
-
-          <form id="form-join-room" class="join-form" novalidate>
-            <div class="input-group">
-              <label for="input-room-code" class="sr-only">Enter 4-Letter Room Code</label>
-              <input 
-                type="text" 
-                id="input-room-code" 
-                class="input input-room-code" 
-                placeholder="VIBE" 
-                maxlength="4" 
-                autocomplete="off" 
-                autocorrect="off" 
-                autocapitalize="characters" 
-                spellcheck="false"
-              >
-              <button id="btn-join-room" class="btn btn-secondary btn-join" type="submit">
-                <span class="btn-text">Join</span>
-              </button>
-            </div>
-            <div id="join-error-msg" class="error-banner hidden" role="alert"></div>
-          </form>
-        </section>
-
-        <!-- Active Parties Quick-List -->
-        <section id="recent-rooms-section" class="recent-rooms-section hidden">
-          <div class="section-subtitle-wrap">
-            <span class="subtitle-icon">✨</span>
-            <h2 class="section-subtitle">Your Active Parties</h2>
-          </div>
-          <div id="recent-rooms-list" class="recent-rooms-list"></div>
-        </section>
-
-        <!-- Feature Highlights Footer -->
-        <footer class="landing-footer-grid">
-          <div class="highlight-item">
-            <span class="highlight-icon">⚡</span>
-            <span class="highlight-label">Zero Delay Sync</span>
-          </div>
-          <div class="highlight-item">
-            <span class="highlight-icon">📱</span>
-            <span class="highlight-label">Scan & Join</span>
-          </div>
-          <div class="highlight-item">
-            <span class="highlight-icon">🎵</span>
-            <span class="highlight-label">DJ Upvote Queue</span>
-          </div>
-        </footer>
+    <form class="joiner" id="form-join" novalidate>
+      <div class="joiner__slots" id="code-slots">
+        <input class="slot" type="text" inputmode="latin" maxlength="1" aria-label="Code letter 1" autocomplete="off" autocorrect="off" spellcheck="false">
+        <input class="slot" type="text" inputmode="latin" maxlength="1" aria-label="Code letter 2" autocomplete="off" autocorrect="off" spellcheck="false">
+        <input class="slot" type="text" inputmode="latin" maxlength="1" aria-label="Code letter 3" autocomplete="off" autocorrect="off" spellcheck="false">
+        <input class="slot" type="text" inputmode="latin" maxlength="1" aria-label="Code letter 4" autocomplete="off" autocorrect="off" spellcheck="false">
       </div>
-    </main>
+      <button class="joiner__go" id="btn-join" type="submit" aria-label="Join room">Join</button>
+    </form>
 
-    <!-- ROOM VIEW -->
-    <main id="view-room" class="view hidden">
-      <!-- Room Navigation Bar -->
-      <header class="room-header card-glass">
-        <div class="room-header-left">
-          <button id="btn-leave-room" class="btn-icon-only" type="button" title="Back to Parties" aria-label="Leave room">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="15 18 9 12 15 6"></polyline>
-            </svg>
-          </button>
-          <div class="room-brand">
-            <span class="brand-name">PartyPulse</span>
-            <span class="live-pill">
-              <span class="live-dot"></span> LIVE
-            </span>
-          </div>
-        </div>
+    <p class="err" id="entry-err" role="alert" hidden></p>
 
-        <div class="room-header-right">
-          <!-- QR Code Projector Modal Button -->
-          <button id="btn-show-qr" class="btn-icon-only btn-qr-trigger" type="button" title="Show Host QR Code & Share" aria-label="Show QR Code">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="7" height="7"></rect>
-              <rect x="14" y="3" width="7" height="7"></rect>
-              <rect x="14" y="14" width="7" height="7"></rect>
-              <rect x="3" y="14" width="7" height="7"></rect>
-            </svg>
-          </button>
+    <div class="recents" id="recents" hidden>
+      <span class="recents__cap">Your rooms</span>
+      <div class="recents__row" id="recents-row"></div>
+    </div>
 
-          <!-- Tap to Copy Room Code -->
-          <button id="btn-copy-code" class="room-code-badge" type="button" title="Click to copy room code" aria-label="Room code">
-            <span class="code-label">CODE</span>
-            <span id="display-room-code" class="code-value">----</span>
-            <span class="copy-icon" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </span>
-          </button>
-        </div>
-      </header>
-
-      <!-- VIBE CHECK SECTION -->
-      <section class="vibe-section card-luxe" aria-label="Vibe Check">
-        <div class="section-header">
-          <div class="section-title-wrap">
-            <span class="title-glow-icon">🌡️</span>
-            <div>
-              <h2 class="section-title">Vibe Spectrum</h2>
-              <p class="section-hint">Rolling live crowd temperature</p>
-            </div>
-          </div>
-          <span class="vibe-window-badge">Last 5 min</span>
-        </div>
-
-        <!-- Dynamic Vibe Spectrum Display -->
-        <div class="vibe-meter-container">
-          <div class="vibe-counts-row">
-            <div class="vibe-stat vibe-stat-fire">
-              <span class="stat-icon">🔥</span>
-              <div class="stat-info">
-                <strong id="count-fire" class="stat-num">0</strong>
-                <span class="stat-tag">HYPED</span>
-              </div>
-            </div>
-
-            <div class="vibe-status-center">
-              <span id="vibe-status-text" class="vibe-status-text">Party warming up...</span>
-              <span id="vibe-percentage-text" class="vibe-pct">50% Balance</span>
-            </div>
-
-            <div class="vibe-stat vibe-stat-sleepy">
-              <div class="stat-info text-right">
-                <strong id="count-sleepy" class="stat-num">0</strong>
-                <span class="stat-tag">CHILL</span>
-              </div>
-              <span class="stat-icon">😴</span>
-            </div>
-          </div>
-
-          <!-- Dynamic Bar Track -->
-          <div class="vibe-bar-track">
-            <div id="vibe-bar-fill" class="vibe-bar-fill" style="width: 50%;">
-              <div class="bar-shine"></div>
-            </div>
-            <div class="vibe-bar-center-marker"></div>
-          </div>
-        </div>
-
-        <!-- Interactive Tap Action Buttons -->
-        <div class="vibe-actions">
-          <button id="btn-vibe-fire" class="btn-vibe btn-vibe-fire" type="button" aria-label="Fire vibe">
-            <div class="vibe-emoji-wrap">
-              <span class="vibe-btn-emoji">🔥</span>
-            </div>
-            <div class="vibe-btn-text">
-              <span class="vibe-btn-label">Fire</span>
-              <span class="vibe-btn-sub">Hyped Up!</span>
-            </div>
-          </button>
-          
-          <button id="btn-vibe-sleepy" class="btn-vibe btn-vibe-sleepy" type="button" aria-label="Sleepy vibe">
-            <div class="vibe-emoji-wrap">
-              <span class="vibe-btn-emoji">😴</span>
-            </div>
-            <div class="vibe-btn-text">
-              <span class="vibe-btn-label">Sleepy</span>
-              <span class="vibe-btn-sub">Need Energy</span>
-            </div>
-          </button>
-        </div>
-
-        <!-- Extra Reaction Emoji Bar -->
-        <div class="reaction-bar">
-          <span class="reaction-label">Quick Reactions:</span>
-          <div class="reaction-chips">
-            <button class="btn-reaction" type="button" data-emoji="🎉" title="Confetti">🎉</button>
-            <button class="btn-reaction" type="button" data-emoji="⚡" title="Electric">⚡</button>
-            <button class="btn-reaction" type="button" data-emoji="🕺" title="Dancing">🕺</button>
-            <button class="btn-reaction" type="button" data-emoji="🚀" title="Rocket">🚀</button>
-            <button class="btn-reaction" type="button" data-emoji="❤️" title="Love">❤️</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- LIVE SONG QUEUE SECTION -->
-      <section class="queue-section card-luxe" aria-label="Live Song Queue">
-        <div class="section-header">
-          <div class="section-title-wrap">
-            <span class="title-glow-icon">🎵</span>
-            <div>
-              <h2 class="section-title">Live DJ Queue</h2>
-              <p class="section-hint">Highest votes play next</p>
-            </div>
-          </div>
-          <span id="song-count-badge" class="badge-count">0 tracks</span>
-        </div>
-
-        <!-- Add Track Form -->
-        <form id="form-add-song" class="add-song-form" novalidate>
-          <div class="song-input-wrapper">
-            <div class="input-icon-prefix">🎧</div>
-            <input 
-              type="text" 
-              id="input-song-title" 
-              class="input input-song" 
-              placeholder="Suggest a track or artist (e.g. Starboy)..." 
-              maxlength="100" 
-              autocomplete="off" 
-              spellcheck="false"
-            >
-            <button id="btn-add-song" class="btn btn-primary btn-add-song" type="submit">
-              <span>Add</span>
-            </button>
-          </div>
-          <div id="song-error-msg" class="error-banner hidden" role="alert"></div>
-        </form>
-
-        <!-- Song List Container -->
-        <div id="song-list-container" class="song-list-container">
-          <!-- Empty State -->
-          <div id="queue-empty-state" class="empty-state">
-            <div class="empty-animation-wrap">
-              <div class="vinyl-disc">
-                <div class="vinyl-center"></div>
-              </div>
-              <div class="empty-notes">🎶</div>
-            </div>
-            <h3 class="empty-title">The deck is waiting!</h3>
-            <p class="empty-desc">Drop the first song request to ignite the dance floor.</p>
-          </div>
-
-          <!-- Active Songs -->
-          <ul id="song-list" class="song-list hidden" role="list"></ul>
-        </div>
-
-        <!-- Song Queue Actions -->
-        <div class="queue-footer-actions">
-          <button id="btn-export-recap" class="btn-pill-action" type="button" title="Export Tracklist & Recap">
-            <span>📋 Export Tracklist & Recap</span>
-          </button>
-        </div>
-      </section>
-
-      <!-- Viral Growth Loop CTA Card -->
-      <section class="viral-card card-glass">
-        <div class="viral-card-left">
-          <span class="viral-icon">⚡</span>
-          <div>
-            <h4 class="viral-title">Hosting your own gathering?</h4>
-            <p class="viral-sub">Create your free party room in 5 seconds.</p>
-          </div>
-        </div>
-        <button id="btn-viral-create" class="btn btn-secondary btn-sm" type="button">
-          <span>Host a Party 🚀</span>
-        </button>
-      </section>
-    </main>
+    <footer class="entry__foot">
+      <div><b>01</b><span>Project the code</span></div>
+      <div><b>02</b><span>Crowd requests tracks</span></div>
+      <div><b>03</b><span>Loudest votes play next</span></div>
+    </footer>
   </div>
+</section>
 
-  <!-- QR CODE / HOST PROJECTOR MODAL -->
-  <div id="modal-qr" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
-    <div class="modal-card">
-      <header class="modal-header">
-        <h3 id="qr-modal-title" class="modal-title">📱 Scan to Join Party</h3>
-        <button id="btn-close-qr" class="btn-icon-only modal-close" type="button" aria-label="Close modal">✕</button>
-      </header>
+<!-- ============================ ROOM ============================ -->
+<section class="screen" id="screen-room" hidden>
 
-      <div class="modal-body qr-modal-body">
-        <p class="modal-desc">Point your phone camera at the screen to join the party room instantly.</p>
-        
-        <div class="qr-canvas-wrap">
-          <div id="qr-code-svg" class="qr-code-svg"></div>
-        </div>
+  <header class="bar">
+    <button class="bar__back" id="btn-leave" type="button" aria-label="Leave room">←</button>
+    <button class="bar__code" id="btn-code" type="button" title="Tap to copy code">
+      <span class="bar__code-cap">ROOM</span>
+      <span class="bar__code-val" id="room-code">····</span>
+    </button>
+    <div class="bar__right">
+      <span class="live"><i></i>LIVE</span>
+      <button class="bar__share" id="btn-share" type="button" aria-label="Share room">Share</button>
+    </div>
+  </header>
 
-        <div class="qr-code-display">
-          <span class="qr-code-label">ROOM CODE</span>
-          <span id="qr-display-code" class="qr-code-text">----</span>
-        </div>
-
-        <button id="btn-copy-share-link" class="btn btn-secondary btn-block" type="button">
-          <span>🔗 Copy Direct Share Link</span>
-        </button>
+  <!-- ---------- ENERGY ---------- -->
+  <section class="energy" aria-label="Crowd energy">
+    <div class="energy__top">
+      <div class="energy__read">
+        <span class="energy__num" id="energy-num">50</span>
+        <span class="energy__pct">%</span>
+      </div>
+      <div class="energy__say">
+        <span class="energy__verdict" id="energy-verdict">Waiting on the crowd</span>
+        <span class="energy__win">rolling 5 min window</span>
       </div>
     </div>
-  </div>
 
-  <!-- HACKATHON PITCH DECK & JUDGE DOSSIER MODAL -->
-  <div id="modal-pitch" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pitch-modal-title">
-    <div class="modal-card modal-card-xl">
-      <header class="modal-header">
-        <div class="modal-title-wrap">
-          <span class="pitch-trophy-badge">🏆</span>
-          <div>
-            <h3 id="pitch-modal-title" class="modal-title">Hackathon Judge Dossier & GTM Deck</h3>
-            <p class="modal-subtitle">Google's "Hack the Beat Seoul" — Score = (A + B + C) × D</p>
-          </div>
-        </div>
-        <button id="btn-close-pitch" class="btn-icon-only modal-close" type="button" aria-label="Close modal">✕</button>
-      </header>
-
-      <div class="modal-body">
-        <!-- Pitch Tab Navigation -->
-        <div class="pitch-tabs">
-          <button class="pitch-tab active" data-tab="tab-core">⚡ A. Core Flow (34%)</button>
-          <button class="pitch-tab" data-tab="tab-gtm">🚀 B. GTM & Viral (33%)</button>
-          <button class="pitch-tab" data-tab="tab-biz">💰 C. Business & Unit Econ (33%)</button>
-          <button class="pitch-tab" data-tab="tab-topic">🎯 D. Topic Fit (10/10)</button>
-        </div>
-
-        <!-- Tab 1: Core Flow & Stability -->
-        <div id="tab-core" class="pitch-tab-pane active">
-          <div class="pitch-grid-2">
-            <div class="pitch-card">
-              <span class="pcard-badge badge-green">40% of A</span>
-              <h4 class="pcard-title">Core Flow Completion (100%)</h4>
-              <p class="pcard-desc">Zero-friction Create Room → Auto-Uppercase Join → Real-Time DJ Queue Sorting → 5-Min Rolling Vibe Meter.</p>
-              <ul class="pcard-list">
-                <li>✅ 4-Letter unique code with URL hash deep linking</li>
-                <li>✅ Instant upvoting with harmonic Web Audio SFX</li>
-                <li>✅ Rolling 5-minute vibe temperature calculation</li>
-              </ul>
-            </div>
-            <div class="pitch-card">
-              <span class="pcard-badge badge-blue">20% of A</span>
-              <h4 class="pcard-title">Dual-Engine Resilience</h4>
-              <p class="pcard-desc">Two-tier sync guarantees 100% uptime with zero failure states:</p>
-              <ul class="pcard-list">
-                <li>☁️ <strong>Supabase Cloud</strong>: WebSockets for physical phones</li>
-                <li>⚡ <strong>BroadcastChannel P2P</strong>: Zero-config local tab sync</li>
-                <li>🛡️ <strong>Zero Console Errors</strong>: Strict vanilla ES6+ & CSS</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 2: GTM & Viral Growth -->
-        <div id="tab-gtm" class="pitch-tab-pane hidden">
-          <div class="pitch-grid-2">
-            <div class="pitch-card">
-              <span class="pcard-badge badge-purple">K-Factor: 3.2</span>
-              <h4 class="pcard-title">Viral Guest-to-Host Loop</h4>
-              <p class="pcard-desc">Every party has 1 host projecting a QR code to 50–200 guests. 6.4% of guests convert to hosts within 7 days via the persistent in-room CTA.</p>
-              <div class="viral-formula-box">
-                <code>1 Host → 50 Guests Scan → 3 New Hosts (K = 3.2)</code>
-              </div>
-            </div>
-            <div class="pitch-card">
-              <span class="pcard-badge badge-pink">Beachhead GTM</span>
-              <h4 class="pcard-title">Seoul Nightlife Acquisition</h4>
-              <p class="pcard-desc">Targeting university club festivals (SNU, Yonsei, KU) & Hongdae/Itaewon DJs with branded table QR standees and 1-tap Instagram Story recap cards.</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tab 3: Business Viability -->
-        <div id="tab-biz" class="pitch-tab-pane hidden">
-          <div class="pitch-grid-3">
-            <div class="pitch-stat-box">
-              <span class="pstat-val">$120M</span>
-              <span class="pstat-lbl">SOM (KR/Asia Gen-Z Nightlife)</span>
-            </div>
-            <div class="pitch-stat-box">
-              <span class="pstat-val">16.9x</span>
-              <span class="pstat-lbl">LTV / CAC Ratio ($47.50 / $0.28)</span>
-            </div>
-            <div class="pitch-stat-box">
-              <span class="pstat-val">$9.99/mo</span>
-              <span class="pstat-lbl">Host Pro / $99 Venue B2B</span>
-            </div>
-          </div>
-          <div class="pitch-card mt-10">
-            <h4 class="pcard-title">Monetization & SuperVote Tipping</h4>
-            <p class="pcard-desc">Freemium model with $9.99/mo Pro Host Tier + <strong>$1.00 "SuperVote"</strong> track bidding tips (70% DJ / 30% PartyPulse platform split).</p>
-          </div>
-        </div>
-
-        <!-- Tab 4: Topic Fit Multiplier -->
-        <div id="tab-topic" class="pitch-tab-pane hidden">
-          <div class="pitch-card">
-            <span class="pcard-badge badge-gold">Score: 10/10 Multiplier</span>
-            <h4 class="pcard-title">Google's "Hack the Beat Seoul" Fit</h4>
-            <p class="pcard-desc">PartyPulse directly addresses the hackathon theme by converting passive party spectators into active crowd beat-makers. Synchronized audio visualizers, rolling vibe energy analysis, and zero-download web technology make it the ultimate Seoul gathering tool.</p>
-          </div>
-        </div>
-      </div>
+    <div class="gauge">
+      <div class="gauge__fill" id="gauge-fill"></div>
+      <div class="gauge__pin" id="gauge-pin"></div>
+      <div class="gauge__mid"></div>
     </div>
+
+    <div class="energy__legend">
+      <span class="lg lg--chill"><b id="count-sleepy">0</b> sleepy</span>
+      <span class="lg__mid" id="ticker">—</span>
+      <span class="lg lg--fire"><b id="count-fire">0</b> fire</span>
+    </div>
+  </section>
+
+  <!-- ---------- QUEUE ---------- -->
+  <section class="queue" aria-label="Song queue">
+    <div class="queue__head">
+      <h2>The Queue</h2>
+      <span class="queue__n" id="queue-n">0 tracks</span>
+    </div>
+
+    <form class="adder" id="form-song" novalidate>
+      <input class="adder__in" id="song-in" type="text" maxlength="90"
+             placeholder="Request a track…" autocomplete="off" spellcheck="false">
+      <button class="adder__go" id="btn-add" type="submit">Add</button>
+    </form>
+    <p class="err" id="song-err" role="alert" hidden></p>
+
+    <ol class="list" id="list"></ol>
+
+    <div class="void" id="void">
+      <div class="void__bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <p>Nothing queued yet.<span>First request sets the tone.</span></p>
+    </div>
+
+    <button class="recap" id="btn-recap" type="button">Copy set recap</button>
+  </section>
+
+  <div class="dock-pad" aria-hidden="true"></div>
+
+  <!-- ---------- VIBE DOCK (thumb zone) ---------- -->
+  <div class="dock">
+    <button class="vibe vibe--chill" id="btn-sleepy" type="button">
+      <span class="vibe__ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </span>
+      <span class="vibe__txt">Sleepy</span>
+    </button>
+    <button class="vibe vibe--fire" id="btn-fire" type="button">
+      <span class="vibe__ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2s5 4.5 5 9a5 5 0 0 1-10 0c0-1.5.6-2.8 1.4-3.8C8.9 8.6 10 9.5 10 11c0-3 2-5.5 2-9z"/></svg>
+      </span>
+      <span class="vibe__txt">Fire</span>
+    </button>
   </div>
+</section>
 
-  <!-- SUPABASE CLOUD CONFIGURATION MODAL -->
-  <div id="modal-cloud" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cloud-modal-title">
-    <div class="modal-card modal-card-lg">
-      <header class="modal-header">
-        <div class="modal-title-wrap">
-          <span class="cloud-icon-badge">☁️</span>
-          <div>
-            <h3 id="cloud-modal-title" class="modal-title">Supabase Cloud Sync</h3>
-            <p class="modal-subtitle">Connect real smartphones & devices across the internet</p>
-          </div>
-        </div>
-        <button id="btn-close-cloud" class="btn-icon-only modal-close" type="button" aria-label="Close modal">✕</button>
-      </header>
+<!-- ============================ SHARE SHEET ============================ -->
+<div class="sheet" id="sheet-share" hidden>
+  <div class="sheet__card" role="dialog" aria-modal="true" aria-label="Share room">
+    <button class="sheet__x" id="btn-share-x" type="button" aria-label="Close">✕</button>
+    <span class="sheet__cap">Point a camera here</span>
+    <div class="qr" id="qr"></div>
+    <div class="sheet__code" id="share-code">····</div>
+    <button class="sheet__btn" id="btn-copy-link" type="button">Copy join link</button>
+  </div>
+</div>
 
-      <div class="modal-body">
-        <div class="cloud-status-banner" id="cloud-status-banner">
-          <span class="banner-dot dot-local"></span>
-          <span id="cloud-banner-text">Currently in High-Speed Local Multi-Tab Mode. Connect Supabase for multi-device internet sync.</span>
-        </div>
+<!-- ============================ CONNECTION SHEET ============================ -->
+<div class="sheet" id="sheet-net" hidden>
+  <div class="sheet__card sheet__card--wide" role="dialog" aria-modal="true" aria-label="Connection">
+    <button class="sheet__x" id="btn-net-x" type="button" aria-label="Close">✕</button>
+    <span class="sheet__cap">Realtime backend</span>
+    <p class="sheet__note" id="net-note"></p>
 
-        <form id="form-supabase-config" class="cloud-config-form">
-          <div class="form-group">
-            <label for="input-sb-url" class="form-label">Supabase Project URL</label>
-            <input 
-              type="url" 
-              id="input-sb-url" 
-              class="input input-cloud" 
-              placeholder="https://your-project-id.supabase.co" 
-              autocomplete="off" 
-              spellcheck="false"
-            >
-          </div>
+    <form id="form-net" class="netform">
+      <label>Supabase project URL
+        <input id="in-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" spellcheck="false">
+      </label>
+      <label>Anon public key
+        <input id="in-key" type="password" placeholder="eyJhbGciOi…" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="netform__row">
+        <button class="sheet__btn" type="submit">Connect</button>
+        <button class="sheet__btn sheet__btn--ghost" id="btn-net-clear" type="button">Local only</button>
+      </div>
+    </form>
 
-          <div class="form-group">
-            <label for="input-sb-key" class="form-label">Supabase Anon Key (Public API Key)</label>
-            <input 
-              type="password" 
-              id="input-sb-key" 
-              class="input input-cloud" 
-              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." 
-              autocomplete="off" 
-              spellcheck="false"
-            >
-          </div>
-
-          <div class="cloud-actions">
-            <button id="btn-save-cloud" class="btn btn-primary" type="submit">
-              <span>Save & Connect Cloud</span>
-            </button>
-            <button id="btn-clear-cloud" class="btn btn-secondary" type="button">
-              <span>Reset to Local Mode</span>
-            </button>
-          </div>
-        </form>
-
-        <div class="schema-helper-section">
-          <div class="schema-header">
-            <span class="schema-title">⚡ 1-Click Supabase SQL Setup Schema</span>
-            <button id="btn-copy-sql" class="btn-pill-small" type="button">
-              <span>📋 Copy SQL Schema</span>
-            </button>
-          </div>
-          <p class="schema-hint">Paste this into your <strong>Supabase Dashboard &gt; SQL Editor</strong> to create the tables with Realtime enabled:</p>
-          <pre class="sql-code-box"><code>-- PartyPulse Supabase Database Schema
-CREATE TABLE IF NOT EXISTS rooms (
-  code TEXT PRIMARY KEY,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+    <details class="sql">
+      <summary>Database schema <b id="btn-copy-sql">copy SQL</b></summary>
+      <pre id="sql-text"><code>create table if not exists rooms (
+  id uuid primary key default gen_random_uuid(),
+  code text unique not null,
+  created_at timestamptz default now()
+);
+create table if not exists songs (
+  id uuid primary key default gen_random_uuid(),
+  room_code text not null,
+  title text not null,
+  votes int4 not null default 0,
+  created_at timestamptz default now()
+);
+create table if not exists vibes (
+  id uuid primary key default gen_random_uuid(),
+  room_code text not null,
+  value text not null,
+  created_at timestamptz default now()
 );
 
-CREATE TABLE IF NOT EXISTS songs (
-  id TEXT PRIMARY KEY,
-  room_code TEXT REFERENCES rooms(code) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  votes INT4 DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+alter table rooms  enable row level security;
+alter table songs  enable row level security;
+alter table vibes  enable row level security;
+create policy "anon all rooms" on rooms for all using (true) with check (true);
+create policy "anon all songs" on songs for all using (true) with check (true);
+create policy "anon all vibes" on vibes for all using (true) with check (true);
 
-CREATE TABLE IF NOT EXISTS vibes (
-  id TEXT PRIMARY KEY,
-  room_code TEXT REFERENCES rooms(code) ON DELETE CASCADE,
-  value TEXT NOT NULL,
-  timestamp INT8 NOT NULL
-);
-
--- Enable Realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE rooms, songs, vibes;
-ALTER TABLE rooms ENABLE ROW LEVEL SECURITY;
-ALTER TABLE songs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE vibes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public full access on rooms" ON rooms FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access on songs" ON songs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access on vibes" ON vibes FOR ALL USING (true) WITH CHECK (true);</code></pre>
-        </div>
-      </div>
-    </div>
+alter publication supabase_realtime add table rooms, songs, vibes;</code></pre>
+    </details>
   </div>
+</div>
 
-  <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

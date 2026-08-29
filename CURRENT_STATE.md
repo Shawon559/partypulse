@@ -1,22 +1,36 @@
-# PartyPulse PRO - Current State & Hackathon Success Tracking
+# PartyPulse — build log
 
-## Google "Hack the Beat Seoul" Judging Criteria Matrix:
-- [x] **A. 기획 의도대로 작동 (Works as Intended — 34%)**:
-  - [x] Core flow completion (Create Room → Add/Vote Songs → Vibe Check → Realtime QR join)
-  - [x] Deployment & stability (Zero console errors, Dual-Engine Supabase + BroadcastChannel sync)
-  - [x] Match between plan and implementation (100% feature match)
-  - [x] Completeness & detail (Procedural Web Audio synth, vector SVG QR, jumping equalizer waves, 5-min decay timer)
-- [x] **B. GTM 전략 (Go-to-Market Strategy — 33%)**:
-  - [x] Target customer specificity (Hongdae/Gangnam club DJs, SNU/Yonsei/KU festival organizers)
-  - [x] Realism of acquisition (Branded cup QR stickers, campus DJ takeovers, Instagram 9:16 recap cards)
-  - [x] Party/viral growth structure (K-Factor = 3.2, 1 Host → 50 Guests → 3 New Hosts via in-room CTA)
-  - [x] Retention triggers (1-Click Spotify export, Friday Night host re-engagement alerts)
-- [x] **C. 비즈니스 가능성 (Business Viability — 33%)**:
-  - [x] Revenue model & WTP (Freemium + $9.99/mo Pro Host + $1.00 SuperVote tip splitting + $99/mo B2B Venues)
-  - [x] Market size ($65B TAM, $4.2B SAM, $120M Korea/Asia Gen-Z Nightlife SOM)
-  - [x] Defensibility (Zero-friction web app moat, dual music + crowd sentiment feedback loop)
-  - [x] Unit economics (CAC $0.28, LTV $47.50, LTV/CAC = 16.9x)
-- [x] **D. 주제 적합성 (Topic Fit — Scored 10/10)**:
-  - [x] "Hack the Beat Seoul" music & live gathering synergy, beat visualizers, and Seoul festival culture
+Single-page live party engagement app. Plain HTML/CSS/JS, no build step.
+Files: `index.html`, `style.css`, `app.js`.
 
-STATUS: DONE
+## Success criteria
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | index.html loads with zero console errors | PASS |
+| 2 | Creating a room generates a working shareable code | PASS |
+| 3 | Joining via code loads that room's data | PASS |
+| 4 | Song appears in a 2nd tab within 2s, no refresh | PASS |
+| 5 | Upvote updates sort order live across tabs | PASS |
+| 6 | Vibe taps update live counter across tabs | PASS |
+| 7 | No horizontal scroll at 375px | PASS |
+| 8 | No hardcoded room code — URL/input drives all queries | PASS |
+
+Verified by an automated Playwright suite (2 real browser tabs, 375×812).
+
+## Iterations
+- **01** — Rebuilt from scratch against the spec. New visual direction: poster
+  typography (Anton/Space Grotesk/Space Mono), acid-on-black palette, grain
+  overlay, thumb-zone vibe dock. Dropped the previous emoji-card layout.
+- **02** — Bug: `.sheet{display:flex}` outranked the `hidden` attribute, so
+  invisible overlays swallowed every click. Added `[hidden]{display:none!important}`.
+  Suite went 0 → 12 passing.
+- **03** — Test defect, not app defect: upvote test clicked row index 1 twice, but
+  rows re-sort after each vote. Retargeted by title. 13/13.
+- **04** — QR encoder produced an unscannable code. Diffed my matrix against a
+  reference encoder: data and mask were byte-perfect, 8 format-info modules wrong.
+  Root cause: format bits placed LSB-first; canonical order is MSB-first, and the
+  dark module was being overwritten by a format bit. Now 0/841 modules differ from
+  reference across versions 3–6, and jsQR decodes the rendered SVG.
+- **05** — Layout fixes: footer container background bled through its top padding
+  as a grey band; toasts covered the room code. Footer is now a hairline list,
+  toasts moved above the dock.
