@@ -306,6 +306,88 @@ h1,h2,p{ margin:0; }
 .lg__mid.flash{ animation:flash 620ms ease-out; }
 @keyframes flash{ 0%{ color:var(--paper); transform:translateY(-3px) } 100%{ color:var(--dimmer); transform:none } }
 
+/* -------------------------------------------------------------- pulse cam */
+.camcta{
+  width:100%; margin-top:16px; padding:12px 13px;
+  display:flex; align-items:center; gap:12px; text-align:left;
+  border:1px solid var(--line); border-radius:12px; background:var(--ink-2);
+  transition:border-color 180ms, background 180ms;
+}
+.camcta:hover{ border-color:var(--acid); }
+.camcta--on{ border-color:var(--acid); background:rgba(216,255,52,.07); }
+.camcta__ico{ width:21px; height:21px; flex:none; color:var(--dim); }
+.camcta--on .camcta__ico{ color:var(--acid); }
+.camcta__ico svg{ width:100%; height:100%; display:block; }
+.camcta__txt{ flex:1; min-width:0; display:block; }
+.camcta__txt b{ display:block; font-size:14px; font-weight:700; letter-spacing:-.01em; }
+.camcta__txt i{
+  display:block; font-style:normal; font-size:11.5px; color:var(--dimmer);
+  margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.camcta__st{
+  flex:none; font-family:var(--font-m); font-size:9px; letter-spacing:.14em;
+  padding:5px 9px; border-radius:6px; background:var(--ink); color:var(--dimmer);
+}
+.camcta--on .camcta__st{ background:var(--acid); color:var(--ink); }
+
+.cam{
+  position:relative; margin-top:16px; aspect-ratio:4/3; width:100%;
+  border-radius:12px; overflow:hidden; background:#000; border:1px solid var(--line);
+}
+.cam video{
+  position:absolute; inset:0; width:100%; height:100%;
+  object-fit:cover; transform:scaleX(-1); opacity:.5;
+}
+.cam__fx{
+  position:absolute; inset:0; width:100%; height:100%;
+  transform:scaleX(-1); image-rendering:pixelated; mix-blend-mode:screen;
+}
+.cam__scan{
+  position:absolute; left:0; right:0; height:2px; top:0;
+  background:linear-gradient(90deg,transparent,var(--acid),transparent);
+  opacity:0; animation:scan 2.6s linear infinite;
+}
+.cam--on .cam__scan{ opacity:.75; }
+@keyframes scan{ from{ transform:translateY(0) } to{ transform:translateY(var(--camh,300px)) } }
+.cam__hud{
+  position:absolute; left:9px; bottom:9px;
+  display:flex; align-items:center; gap:6px;
+  font-family:var(--font-m); font-size:9px; letter-spacing:.14em; text-transform:uppercase;
+  background:rgba(8,8,10,.72); border-radius:999px; padding:5px 10px; color:var(--dim);
+}
+.cam__hud i{ width:5px; height:5px; border-radius:50%; background:var(--dimmer); }
+.cam--on .cam__hud i{ background:var(--fire); animation:ping-r 1.4s ease-out infinite; }
+
+.cam__meters{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+.cmeter{
+  background:var(--ink); border:1px solid var(--line); border-radius:10px;
+  padding:10px 8px; text-align:center;
+}
+.cmeter b{ display:block; font-family:var(--font-d); font-size:24px; line-height:1; font-variant-numeric:tabular-nums; }
+.cmeter span{
+  display:block; margin-top:4px;
+  font-family:var(--font-m); font-size:8.5px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--dimmer);
+}
+.cam__bar{ height:5px; margin-top:10px; background:var(--ink); border-radius:999px; overflow:hidden; }
+.cam__bar i{
+  display:block; height:100%; width:0%; border-radius:999px;
+  background:linear-gradient(90deg,var(--chill),var(--acid),var(--fire));
+  transition:width 120ms linear;
+}
+
+/* combo streak on the vibe dock */
+.combo{
+  position:fixed; left:50%; bottom:calc(var(--dock-h) + 14px + env(safe-area-inset-bottom));
+  transform:translateX(-50%); z-index:31; pointer-events:none;
+  font-family:var(--font-d); font-size:15px; letter-spacing:.06em;
+  padding:5px 12px; border-radius:999px;
+  background:var(--paper); color:var(--ink);
+  opacity:0; transition:opacity 180ms;
+}
+.combo--on{ opacity:1; animation:combo-pop 300ms cubic-bezier(.2,1.4,.4,1); }
+@keyframes combo-pop{ 0%{ transform:translateX(-50%) scale(.7) } 60%{ transform:translateX(-50%) scale(1.14) } 100%{ transform:translateX(-50%) scale(1) } }
+
 /* ----------------------------------------------------------------- queue */
 .queue{ padding-bottom:22px; }
 .queue__head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }

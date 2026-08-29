@@ -116,6 +116,17 @@
       <span class="lg__mid" id="ticker">—</span>
       <span class="lg lg--fire"><b id="count-fire">0</b> fire</span>
     </div>
+
+    <button class="camcta" id="btn-cam" type="button">
+      <span class="camcta__ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </span>
+      <span class="camcta__txt">
+        <b>Pulse Cam</b>
+        <i>Point at the floor — it reads the room for you</i>
+      </span>
+      <span class="camcta__st" id="cam-state">OFF</span>
+    </button>
   </section>
 
   <!-- ---------- QUEUE ---------- -->
@@ -143,6 +154,7 @@
   </section>
 
   <div class="dock-pad" aria-hidden="true"></div>
+  <div class="combo" id="combo" aria-hidden="true"></div>
 
   <!-- ---------- VIBE DOCK (thumb zone) ---------- -->
   <div class="dock">
@@ -169,6 +181,36 @@
     <div class="qr" id="qr"></div>
     <div class="sheet__code" id="share-code">····</div>
     <button class="sheet__btn" id="btn-copy-link" type="button">Copy join link</button>
+  </div>
+</div>
+
+<!-- ============================ PULSE CAM ============================ -->
+<div class="sheet" id="sheet-cam" hidden>
+  <div class="sheet__card" role="dialog" aria-modal="true" aria-label="Pulse Cam">
+    <button class="sheet__x" id="btn-cam-x" type="button" aria-label="Close">✕</button>
+    <span class="sheet__cap">Pulse Cam — on-device vision</span>
+
+    <div class="cam">
+      <video id="cam-video" playsinline muted autoplay></video>
+      <canvas id="cam-fx" class="cam__fx" width="64" height="48"></canvas>
+      <div class="cam__scan" id="cam-scan"></div>
+      <div class="cam__hud"><i id="cam-live-dot"></i><span id="cam-hud">standby</span></div>
+    </div>
+
+    <div class="cam__meters">
+      <div class="cmeter"><b id="cam-motion">0</b><span>motion</span></div>
+      <div class="cmeter"><b id="cam-bpm">—</b><span>bpm</span></div>
+      <div class="cmeter"><b id="cam-fed">0</b><span>auto reads</span></div>
+    </div>
+
+    <div class="cam__bar"><i id="cam-bar"></i></div>
+
+    <p class="sheet__note" id="cam-note">
+      Frames are differenced in this browser to measure crowd movement and pick out the beat.
+      Nothing is recorded, and no video ever leaves this device.
+    </p>
+
+    <button class="sheet__btn" id="btn-cam-toggle" type="button">Start reading the room</button>
   </div>
 </div>
 

@@ -551,6 +551,7 @@ const Room = {
   leave(){
     state.code=null; state.songs=[]; state.vibes=[];
     Cloud.unsubscribe();
+    if(Cam.on) Cam.stop();
     clearInterval(tick); tick=null;
   },
 
@@ -611,6 +612,7 @@ const Room = {
     if(!state.code) return;
     const btn = ev.currentTarget;
     UI.ripple(btn, ev);
+    Combo.hit();
     UI.mark(value==='fire'?'FIRE':'CHILL', value==='fire'?'var(--fire)':'var(--chill)', btn);
 
     const v={ id:uid(), value, at:Date.now() };
@@ -751,6 +753,178 @@ const Room = {
   }
 };
 
+/* ------------------------------------------------------------ 8b. pulse cam
+   Reads crowd movement straight off the camera: each frame is downsampled to
+   64x48 luma and differenced against the last one. The mean difference is a
+   motion score; peaks in that signal are footfalls, so their spacing gives a
+   rough BPM. Everything runs in this tab — no frame is uploaded or stored. */
+const W = 64, H = 48;
+
+const Cam = {
+  on:false, raf:null, prev:null, ema:0, fed:0,
+  peaks:[], lastPeak:0, lastFeed:0, cool:0,
+  vid:null, work:null, wctx:null, fx:null, fctx:null,
+
+  boot(){
+    Cam.vid  = $('#cam-video');
+    Cam.fx   = $('#cam-fx');
+    Cam.fctx = Cam.fx.getContext('2d');
+    Cam.work = document.createElement('canvas');
+    Cam.work.width = W; Cam.work.height = H;
+    Cam.wctx = Cam.work.getContext('2d', { willReadFrequently:true });
+
+    $('#btn-cam').addEventListener('click', ()=>{ $('#sheet-cam').hidden=false; });
+    $('#btn-cam-x').addEventListener('click', Cam.close);
+    $('#btn-cam-toggle').addEventListener('click', ()=> Cam.on ? Cam.stop() : Cam.start());
+  },
+
+  close(){ $('#sheet-cam').hidden = true; },
+
+  async start(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+      return Cam.fail('This browser has no camera access.');
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:'environment', width:{ideal:640}, height:{ideal:480} }, audio:false
+      });
+      Cam.vid.srcObject = stream;
+      await Cam.vid.play();
+    }catch(e){
+      return Cam.fail(
+        e && e.name==='NotAllowedError' ? 'Camera permission denied. Allow it in your browser to read the room.'
+      : e && e.name==='NotFoundError'   ? 'No camera found on this device.'
+      : 'Could not open the camera here.');
+    }
+
+    Cam.on=true; Cam.prev=null; Cam.ema=0; Cam.fed=0; Cam.peaks=[];
+    $('#cam-fed').textContent='0';
+    $('.cam').classList.add('cam--on');
+    $('#btn-cam').classList.add('camcta--on');
+    $('#cam-state').textContent='LIVE';
+    $('#cam-hud').textContent='reading';
+    $('#btn-cam-toggle').textContent='Stop reading';
+    $('#cam-note').textContent='Reading movement. Sustained motion feeds fire; a still floor feeds sleepy.';
+    $('.cam').style.setProperty('--camh', $('.cam').clientHeight+'px');
+    Cam.loop();
+  },
+
+  fail(msg){
+    $('#cam-note').textContent = msg;
+    UI.toast(msg, true);
+  },
+
+  stop(){
+    Cam.on=false;
+    if(Cam.raf) cancelAnimationFrame(Cam.raf);
+    const s = Cam.vid.srcObject;
+    if(s) s.getTracks().forEach(t=>t.stop());
+    Cam.vid.srcObject=null;
+    $('.cam').classList.remove('cam--on');
+    $('#btn-cam').classList.remove('camcta--on');
+    $('#cam-state').textContent='OFF';
+    $('#cam-hud').textContent='standby';
+    $('#btn-cam-toggle').textContent='Start reading the room';
+    Cam.fctx.clearRect(0,0,W,H);
+  },
+
+  loop(){
+    if(!Cam.on) return;
+    Cam.raf = requestAnimationFrame(Cam.loop);
+    if(Cam.vid.readyState < 2) return;
+
+    Cam.wctx.drawImage(Cam.vid, 0, 0, W, H);
+    const px = Cam.wctx.getImageData(0,0,W,H);
+    const d  = px.data;
+    const cur = new Uint8Array(W*H);
+    for(let i=0,p=0;i<d.length;i+=4,p++)
+      cur[p] = (d[i]*77 + d[i+1]*150 + d[i+2]*29) >> 8;   // luma
+
+    if(!Cam.prev){ Cam.prev = cur; return; }
+
+    // difference + heat overlay in one pass
+    const heat = Cam.fctx.createImageData(W,H);
+    let sum = 0;
+    for(let p=0;p<cur.length;p++){
+      const diff = Math.abs(cur[p] - Cam.prev[p]);
+      sum += diff;
+      const v = diff > 14 ? Math.min(255, diff*4) : 0;
+      const q = p*4;
+      heat.data[q]   = v;
+      heat.data[q+1] = Math.min(255, v*1.5);
+      heat.data[q+2] = v>0 ? 40 : 0;
+      heat.data[q+3] = v>0 ? 190 : 0;
+    }
+    Cam.fctx.putImageData(heat,0,0);
+    Cam.prev = cur;
+
+    // normalise: ~18 mean luma delta is an energetic floor
+    const raw = Math.min(1, (sum / cur.length) / 18);
+    Cam.ema = Cam.ema*0.82 + raw*0.18;
+
+    const now = performance.now();
+
+    // peak pick on the fast signal -> beat spacing -> bpm
+    if(raw > Cam.ema*1.55 && raw > 0.08 && now - Cam.lastPeak > 260){
+      if(Cam.lastPeak) Cam.peaks.push(now - Cam.lastPeak);
+      Cam.lastPeak = now;
+      if(Cam.peaks.length > 10) Cam.peaks.shift();
+    }
+    let bpm = null;
+    if(Cam.peaks.length >= 4){
+      const s = Cam.peaks.slice().sort((a,b)=>a-b);
+      const med = s[s.length>>1];
+      const b = Math.round(60000/med);
+      if(b>=60 && b<=190) bpm = b;
+    }
+
+    const pct = Math.round(Cam.ema*100);
+    $('#cam-motion').textContent = pct;
+    $('#cam-bpm').textContent    = bpm || '—';
+    $('#cam-bar').style.width    = pct+'%';
+    $('#cam-hud').textContent    = bpm ? bpm+' bpm' : 'reading';
+
+    // feed the room, rate-limited so vision never floods the window
+    if(state.code && now - Cam.lastFeed > 2600){
+      let v = null;
+      if(Cam.ema > 0.42) v = 'fire';
+      else if(Cam.ema < 0.08) v = 'sleepy';
+      if(v){
+        Cam.lastFeed = now;
+        Cam.fed++;
+        $('#cam-fed').textContent = Cam.fed;
+        Cam.push(v);
+      }
+    }
+  },
+
+  async push(value){
+    const v = { id:uid(), value, at:Date.now() };
+    Room.mergeVibe(v);
+    Bus.send({ t:'vibe', vibe:v });
+    Room.say('pulse cam · '+value);
+    if(sb) await sb.from('vibes').insert({ id:v.id, room_code:state.code, value });
+  }
+};
+
+/* ------------------------------------------------------------- 8c. combo
+   Rapid consecutive taps build a streak. Purely local flourish — it makes the
+   dock feel like an instrument rather than a form control. */
+const Combo = {
+  n:0, last:0, timer:null,
+  hit(){
+    const now = Date.now();
+    Combo.n = (now - Combo.last < 1500) ? Combo.n+1 : 1;
+    Combo.last = now;
+    if(Combo.n >= 3){
+      const el = $('#combo');
+      el.textContent = 'x'+Combo.n+' streak';
+      el.classList.remove('combo--on'); void el.offsetWidth; el.classList.add('combo--on');
+      clearTimeout(Combo.timer);
+      Combo.timer = setTimeout(()=>el.classList.remove('combo--on'), 1500);
+    }
+  }
+};
+
 /* -------------------------------------------------------------- 9. router */
 const Router = {
   boot(){
@@ -815,6 +989,7 @@ Bus.boot();
 bootSheets();
 Entry.boot();
 Room.boot();
+Cam.boot();
 Router.boot();
 
 })();
