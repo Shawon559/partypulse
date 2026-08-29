@@ -306,6 +306,107 @@ h1,h2,p{ margin:0; }
 .lg__mid.flash{ animation:flash 620ms ease-out; }
 @keyframes flash{ 0%{ color:var(--paper); transform:translateY(-3px) } 100%{ color:var(--dimmer); transform:none } }
 
+/* ------------------------------------------------------------- join code */
+.bar__share{
+  display:inline-flex; align-items:center; gap:7px;
+  background:var(--acid); color:var(--ink); border-color:var(--acid);
+}
+.bar__share svg{ width:15px; height:15px; flex:none; }
+.bar__share:hover{ filter:brightness(1.08); }
+
+.invite{
+  width:100%; margin-top:4px; padding:13px 14px;
+  display:flex; align-items:center; gap:13px; text-align:left;
+  border:1px solid rgba(216,255,52,.3); border-radius:var(--r);
+  background:linear-gradient(90deg, rgba(216,255,52,.09), var(--ink-2) 60%);
+  transition:border-color 180ms, transform 140ms cubic-bezier(.2,1.2,.4,1);
+}
+.invite:hover{ border-color:var(--acid); }
+.invite:active{ transform:scale(.99); }
+.invite__qr{ width:44px; height:44px; flex:none; background:var(--paper); border-radius:8px; padding:3px; }
+.invite__qr svg{ width:100%; height:100%; display:block; }
+.invite__txt{ flex:1; min-width:0; }
+.invite__txt b{ display:block; font-size:14.5px; font-weight:700; letter-spacing:-.01em; }
+.invite__txt i{
+  display:block; font-style:normal; font-size:11.5px; color:var(--dimmer); margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.invite__go{ flex:none; color:var(--acid); font-size:17px; }
+
+/* -------------------------------------------------------------- projector
+   Built for a TV or beamer across the room: everything legible at distance,
+   nothing interactive. */
+.proj{
+  position:fixed; inset:0; z-index:200;
+  display:flex; align-items:center; justify-content:center; gap:clamp(24px,5vw,72px);
+  padding:clamp(20px,4vw,60px); background:var(--ink);
+  flex-direction:column;
+}
+.proj__x{
+  position:absolute; top:18px; right:20px;
+  font-family:var(--font-m); font-size:11px; letter-spacing:.16em;
+  padding:9px 16px; border:1px solid var(--line); border-radius:999px; color:var(--dim);
+}
+.proj__x:hover{ color:var(--paper); border-color:var(--paper); }
+.proj__left{ text-align:center; flex:none; }
+.proj__qr{
+  width:min(38vh,320px); height:min(38vh,320px);
+  background:var(--paper); border-radius:16px; padding:14px; margin:0 auto;
+}
+.proj__qr svg{ width:100%; height:100%; display:block; }
+.proj__scan{
+  display:block; margin-top:14px;
+  font-family:var(--font-m); font-size:clamp(11px,1.4vw,15px);
+  letter-spacing:.2em; text-transform:uppercase; color:var(--dim);
+}
+.proj__right{ width:100%; max-width:560px; min-width:0; }
+.proj__cap{
+  font-family:var(--font-m); font-size:clamp(10px,1.2vw,13px);
+  letter-spacing:.2em; text-transform:uppercase; color:var(--dimmer);
+}
+.proj__code{
+  font-family:var(--font-d); font-size:clamp(64px,13vw,150px);
+  line-height:.9; letter-spacing:.08em; margin-top:4px;
+}
+.proj__energy{ display:flex; align-items:center; gap:18px; margin-top:18px; }
+.proj__num{ display:flex; align-items:baseline; flex:none; }
+.proj__num b{
+  font-family:var(--font-d); font-size:clamp(40px,7vw,80px); line-height:1;
+  font-variant-numeric:tabular-nums; color:hsl(var(--e-hue) 95% 62%);
+  transition:color 700ms linear;
+}
+.proj__num i{ font-family:var(--font-d); font-style:normal; font-size:clamp(18px,2.5vw,30px); color:var(--dimmer); }
+.proj__meta{ flex:1; min-width:0; }
+.proj__meta span{ display:block; font-size:clamp(14px,1.8vw,20px); font-weight:700; letter-spacing:-.01em; }
+.proj__gauge{ height:8px; margin-top:9px; background:var(--ink-2); border-radius:999px; overflow:hidden; }
+.proj__gauge i{
+  display:block; height:100%; width:50%; border-radius:999px;
+  background:linear-gradient(90deg,var(--chill),hsl(var(--e-hue) 95% 58%));
+  transition:width 620ms cubic-bezier(.2,1,.3,1), background 700ms linear;
+}
+.proj__list{ margin-top:22px; display:flex; flex-direction:column; gap:9px; }
+.proj__list li{
+  display:flex; align-items:center; gap:14px;
+  padding:11px 14px; border:1px solid var(--line); border-radius:12px; background:var(--ink-2);
+}
+.proj__list li:first-child{
+  border-color:rgba(216,255,52,.4);
+  background:linear-gradient(90deg, rgba(216,255,52,.12), var(--ink-2) 55%);
+}
+.proj__list .pr{ font-family:var(--font-d); font-size:clamp(18px,2.4vw,26px); color:var(--dimmer); width:34px; flex:none; }
+.proj__list li:first-child .pr{ color:var(--acid); }
+.proj__list .pt{
+  flex:1; min-width:0; font-size:clamp(15px,2vw,22px); font-weight:500;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.proj__list .pv{ font-family:var(--font-d); font-size:clamp(18px,2.4vw,26px); flex:none; }
+.proj__empty{ color:var(--dimmer); font-size:clamp(14px,1.8vw,19px); padding:14px 0; }
+
+@media (min-aspect-ratio:1/1){
+  .proj{ flex-direction:row; align-items:center; }
+  .proj__qr{ width:min(52vh,420px); height:min(52vh,420px); }
+}
+
 /* -------------------------------------------------------------- pulse cam */
 .camcta{
   width:100%; margin-top:16px; padding:12px 13px;

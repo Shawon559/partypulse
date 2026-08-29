@@ -532,11 +532,19 @@ const Room = {
     $('#btn-leave').addEventListener('click',()=>{ location.hash=''; });
     $('#btn-code').addEventListener('click',()=>UI.copy(state.code,'Code '+state.code+' copied'));
 
-    $('#btn-share').addEventListener('click',()=>{
+    const openShare = ()=>{
       $('#share-code').textContent = state.code;
       $('#qr').innerHTML = QR.svg(Room.link());
       $('#sheet-share').hidden=false;
+    };
+    $('#btn-share').addEventListener('click', openShare);
+    $('#btn-invite').addEventListener('click', openShare);
+
+    $('#btn-projector').addEventListener('click',()=>{
+      $('#sheet-share').hidden=true;
+      Projector.open();
     });
+    $('#btn-proj-x').addEventListener('click', Projector.close);
     $('#btn-share-x').addEventListener('click',()=>{ $('#sheet-share').hidden=true; });
     $('#btn-copy-link').addEventListener('click',()=>UI.copy(Room.link(),'Join link copied'));
 
@@ -556,6 +564,7 @@ const Room = {
     state.songs = []; state.vibes = [];
     $('#room-code').textContent = code;
     $('#song-in').value=''; UI.err($('#song-err'),'');
+    $('#invite-qr').innerHTML = QR.svg(Room.link());
 
     // Subscribe before backfilling, or rows inserted in between are lost.
     let loaded=false;
@@ -693,8 +702,10 @@ const Room = {
     $('#gauge-pin').style.left=pct+'%';
 
     // Drive the ambient field: cool blue when chill, hot red when raging.
+    // Travels the long way round the wheel (blue -> violet -> magenta -> red)
+    // so it never lands on a green that fights the acid accent.
     const e = pct/100;
-    const hue = Math.round(220 - e*208);
+    const hue = Math.round((220 + e*152) % 360);
     document.documentElement.style.setProperty('--e', e.toFixed(3));
     document.documentElement.style.setProperty('--e-hue', hue);
 
@@ -705,6 +716,8 @@ const Room = {
       pct>=40      ? 'Holding steady' :
       pct>=20      ? 'Losing them' :
                      'Drop something now';
+
+    Projector.paint();
   },
 
   paintQueue(){
@@ -763,6 +776,8 @@ const Room = {
         { duration:420, easing:'cubic-bezier(.2,1,.3,1)' }
       );
     });
+
+    Projector.paint();
   },
 
   recap(){
@@ -776,6 +791,62 @@ const Room = {
       ? songs.map((s,i)=>(i+1)+'. '+s.title+' — '+s.votes+(s.votes===1?' vote':' votes')).join('\n')
       : 'No tracks requested.';
     UI.copy(out,'Set recap copied');
+  }
+};
+
+/* ----------------------------------------------------------- 8a. projector
+   A read-only view for the big screen. It renders from the same state as the
+   phone view, so it re-paints on every realtime event without its own polling. */
+const Projector = {
+  on:false,
+
+  open(){
+    if(!state.code) return;
+    Projector.on = true;
+    $('#proj-code').textContent = state.code;
+    $('#proj-qr').innerHTML = QR.svg(Room.link());
+    $('#proj').hidden = false;
+    Projector.paint();
+    const el = document.documentElement;
+    if(el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+  },
+
+  close(){
+    Projector.on = false;
+    $('#proj').hidden = true;
+    if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+  },
+
+  paint(){
+    if(!Projector.on) return;
+
+    const cut = Date.now()-WINDOW_MS;
+    let fire=0, total=0;
+    state.vibes.forEach(v=>{ if(v.at>=cut){ total++; if(v.value==='fire') fire++; } });
+    const pct = total ? Math.round(fire/total*100) : 50;
+
+    $('#proj-energy').textContent = pct;
+    $('#proj-gauge').style.width = pct+'%';
+    $('#proj-verdict').textContent = $('#energy-verdict').textContent;
+
+    const top = state.songs.slice().sort((a,b)=> b.votes-a.votes || a.at-b.at ).slice(0,4);
+    const list = $('#proj-list');
+    list.innerHTML = '';
+    if(!top.length){
+      const li=document.createElement('li');
+      li.className='proj__empty';
+      li.textContent='Scan the code and request the first track.';
+      list.appendChild(li);
+      return;
+    }
+    top.forEach((s,i)=>{
+      const li=document.createElement('li');
+      const r=document.createElement('span'); r.className='pr'; r.textContent=String(i+1).padStart(2,'0');
+      const t=document.createElement('span'); t.className='pt'; t.textContent=s.title;
+      const v=document.createElement('span'); v.className='pv'; v.textContent=s.votes;
+      li.append(r,t,v);
+      list.appendChild(li);
+    });
   }
 };
 
@@ -1006,7 +1077,15 @@ function bootSheets(){
   });
 
   $$('.sheet').forEach(sh=>sh.addEventListener('click', e=>{ if(e.target===sh) sh.hidden=true; }));
-  document.addEventListener('keydown', e=>{ if(e.key==='Escape') $$('.sheet').forEach(s=>s.hidden=true); });
+  document.addEventListener('keydown', e=>{
+    if(e.key!=='Escape') return;
+    if(Projector.on) return Projector.close();
+    $$('.sheet').forEach(s=>s.hidden=true);
+  });
+  // leaving fullscreen by any route (Esc, browser chrome) must exit the view too
+  document.addEventListener('fullscreenchange', ()=>{
+    if(!document.fullscreenElement && Projector.on) Projector.close();
+  });
 }
 
 /* ---------------------------------------------------------------- 11. boot */

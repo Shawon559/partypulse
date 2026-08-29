@@ -51,3 +51,14 @@ Verified by an automated Playwright suite (2 real browser tabs, 375×812).
   that syncs proves it travelled through Supabase).
 - **10** — Deployed to GitHub Pages. Full suite re-run against the live URL, and
   the production QR verified to decode back to the live room link.
+- **11** — Discoverability fix from user testing: the QR was hidden behind a small
+  unstyled "Share" button, so the host could not find the one affordance the whole
+  product depends on. The header button is now the accent colour with a QR glyph,
+  and a "Let people in" prompt with a live QR thumbnail sits directly under the
+  header. Added projector view: a full-screen read-only display for a TV or beamer
+  with a large QR, the room code, and the live energy meter and top tracks. It
+  renders from the same state as the phone view, so it repaints on realtime events
+  without polling.
+- **12** — Energy ramp rerouted the long way round the hue wheel
+  (blue -> violet -> magenta -> red) so the neutral midpoint no longer lands on a
+  green that fought the acid accent. 37/37 tests green across four suites.

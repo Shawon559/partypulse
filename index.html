@@ -94,9 +94,22 @@
     </button>
     <div class="bar__right">
       <span class="live"><i></i>LIVE</span>
-      <button class="bar__share" id="btn-share" type="button" aria-label="Share room">Share</button>
+      <button class="bar__share" id="btn-share" type="button" aria-label="Show join code">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM19 19h2v2h-2z"/></svg>
+        <span>Join code</span>
+      </button>
     </div>
   </header>
+
+  <!-- Host prompt: the QR is the only way in, so it cannot be a hidden affordance -->
+  <button class="invite" id="btn-invite" type="button">
+    <span class="invite__qr" id="invite-qr" aria-hidden="true"></span>
+    <span class="invite__txt">
+      <b>Let people in</b>
+      <i>Show the code on a screen — guests scan and they're in</i>
+    </span>
+    <span class="invite__go" aria-hidden="true">→</span>
+  </button>
 
   <!-- ---------- ENERGY ---------- -->
   <section class="energy" aria-label="Crowd energy">
@@ -186,7 +199,33 @@
     <span class="sheet__cap">Point a camera here</span>
     <div class="qr" id="qr"></div>
     <div class="sheet__code" id="share-code">····</div>
-    <button class="sheet__btn" id="btn-copy-link" type="button">Copy join link</button>
+    <button class="sheet__btn" id="btn-projector" type="button">Open projector view</button>
+    <button class="sheet__btn sheet__btn--ghost" id="btn-copy-link" type="button">Copy join link</button>
+  </div>
+</div>
+
+<!-- ============================ PROJECTOR ============================ -->
+<div class="proj" id="proj" hidden>
+  <button class="proj__x" id="btn-proj-x" type="button" aria-label="Exit projector view">Exit</button>
+
+  <div class="proj__left">
+    <div class="proj__qr" id="proj-qr"></div>
+    <span class="proj__scan">Scan to join</span>
+  </div>
+
+  <div class="proj__right">
+    <span class="proj__cap">Room code</span>
+    <div class="proj__code" id="proj-code">····</div>
+
+    <div class="proj__energy">
+      <div class="proj__num"><b id="proj-energy">50</b><i>%</i></div>
+      <div class="proj__meta">
+        <span id="proj-verdict">Waiting on the crowd</span>
+        <div class="proj__gauge"><i id="proj-gauge"></i></div>
+      </div>
+    </div>
+
+    <ol class="proj__list" id="proj-list"></ol>
   </div>
 </div>
 
