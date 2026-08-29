@@ -14,7 +14,7 @@ const SUPABASE_URL      = 'https://jbmcjkvrjtxfinqkoega.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpibWNqa3ZyanR4ZmlucWtvZWdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5NzE2MDYsImV4cCI6MjEwMzU0NzYwNn0.kS4rhzqgKahtSB79JXadGpJFJE5oFYNtVNkZiU6gqes';
 
 const K = {
-  url:'pp.url', key:'pp.key', rooms:'pp.rooms', recent:'pp.recent',
+  url:'pp.url', key:'pp.key', rooms:'pp.rooms', recent:'pp.recent', hosts:'pp.hosts',
   songs:c=>'pp.s.'+c, vibes:c=>'pp.v.'+c
 };
 const WINDOW_MS = 5*60*1000;   // rolling vibe window
@@ -243,8 +243,9 @@ const QR = (function(){
 })();
 
 /* --------------------------------------------------------------- 2. state */
-const state = { code:null, songs:[], vibes:[], cloud:false };
+const state = { code:null, songs:[], vibes:[], cloud:false, dj:false };
 let sb = null, chan = null, bus = null, tick = null;
+let hasHostRpc = null;   // null = not yet known, false = schema not installed
 
 const ls = {
   get(k,f){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):f; }catch(e){ return f; } },
@@ -274,7 +275,25 @@ const Cloud = {
     return !!(data && data.length);
   },
 
-  async createRoom(code){ if(sb) await sb.from('rooms').insert({ code }); },
+  /* Prefers the RPC, which hashes the PIN server-side so it is never readable
+     by clients. Falls back to a plain insert if the function is not installed —
+     DJ mode then works on the creating device only. */
+  async createRoom(code, pin){
+    if(!sb) return;
+    if(hasHostRpc !== false){
+      const { error } = await sb.rpc('create_room', { p_code:code, p_pin:pin });
+      hasHostRpc = !error;
+      if(!error) return;
+    }
+    await sb.from('rooms').insert({ code });   // schema without the host functions
+  },
+
+  async verifyHost(code, pin){
+    if(!sb || hasHostRpc === false) return null;
+    const { data, error } = await sb.rpc('claim_host', { p_code:code, p_pin:pin });
+    if(error){ hasHostRpc = false; return null; }
+    return data === true;
+  },
 
   /* Backfill history. Merges rather than replaces: the channel is already live
      by the time this runs, so an event can land mid-request and must survive. */
@@ -319,9 +338,16 @@ const Cloud = {
       .on('postgres_changes',
           { event:'UPDATE', schema:'public', table:'songs', filter:'room_code=eq.'+code },
           p => { Room.mergeSong(Song.fromRow(p.new), false); })
+      // DELETE carries only the primary key (default replica identity), so a
+      // room_code filter can never match. Listen unfiltered and match on id.
       .on('postgres_changes',
-          { event:'DELETE', schema:'public', table:'songs', filter:'room_code=eq.'+code },
-          p => { state.songs = state.songs.filter(s=>s.id!==p.old.id); Room.paint(); })
+          { event:'DELETE', schema:'public', table:'songs' },
+          p => {
+            const id = p.old && p.old.id;
+            if(!id || !state.songs.some(s=>s.id===id)) return;
+            state.songs = state.songs.filter(s=>s.id!==id);
+            Room.paint();
+          })
       .on('postgres_changes',
           { event:'INSERT', schema:'public', table:'vibes', filter:'room_code=eq.'+code },
           p => { Room.mergeVibe(Vibe.fromRow(p.new)); })
@@ -352,6 +378,7 @@ const Bus = {
       if(m.t==='song')  Room.mergeSong(m.song, true);
       if(m.t==='vote'){ const s=state.songs.find(x=>x.id===m.id); if(s){ s.votes=m.votes; Room.paint(); } }
       if(m.t==='vibe')  Room.mergeVibe(m.vibe);
+      if(m.t==='kill'){ state.songs = state.songs.filter(s=>s.id!==m.id); Room.paint(); }
     };
   },
   send(msg){ if(bus) bus.postMessage(Object.assign({ code:state.code }, msg)); }
@@ -475,11 +502,13 @@ const Entry = {
         if(!taken) break;
         code=Entry.gen();
       }
-      if(sb) await Cloud.createRoom(code);
+      const pin = Rooms.newPin();
+      if(sb) await Cloud.createRoom(code, pin);
       ls.set(K.rooms, known.concat([code]));
+      Rooms.claim(code, pin);          // creator is the DJ, no login required
       Rooms.remember(code);
       location.hash = code;
-      UI.toast('Room '+code+' is open');
+      UI.toast('Room '+code+' is open — you are the DJ');
     } finally {
       btn.disabled=false; $('.cta__label').textContent='Start a room'; $('#cta-load').hidden=true;
     }
@@ -523,6 +552,19 @@ const Rooms = {
     const list=ls.get(K.recent,[]).filter(c=>c!==code);
     list.unshift(code);
     ls.set(K.recent, list.slice(0,5));
+  },
+
+  /* DJ status lives on the device that created the room. The PIN exists only to
+     move it to a second device — the DJ's laptop driving the projector. */
+  hosts(){ return ls.get(K.hosts,{}); },
+  pinFor(code){ return Rooms.hosts()[code] || null; },
+  isHost(code){ return !!Rooms.pinFor(code); },
+  claim(code, pin){
+    const h = Rooms.hosts(); h[code] = pin; ls.set(K.hosts, h);
+  },
+  newPin(){
+    const n = crypto.getRandomValues(new Uint32Array(1))[0] % 10000;
+    return String(n).padStart(4,'0');
   }
 };
 
@@ -555,9 +597,64 @@ const Room = {
     $('#btn-sleepy').addEventListener('click',e=>Room.vibe('sleepy',e));
 
     $('#btn-recap').addEventListener('click', Room.recap);
+
+    $('#btn-copy-pin').addEventListener('click', e=>{
+      e.stopPropagation();
+      UI.copy(Rooms.pinFor(state.code)||'', 'DJ PIN copied');
+    });
+
+    // --- DJ unlock, for the host arriving on a second device
+    const slots = $$('#pin-slots .slot');
+    slots.forEach((el,i)=>{
+      el.addEventListener('input',()=>{
+        el.value = el.value.replace(/\D/g,'');
+        UI.err($('#dj-err'),'');
+        if(el.value && i<slots.length-1) slots[i+1].focus();
+      });
+      el.addEventListener('keydown',e=>{
+        if(e.key==='Backspace' && !el.value && i>0){ slots[i-1].focus(); slots[i-1].value=''; }
+      });
+    });
+
+    $('#btn-unlock').addEventListener('click',()=>{
+      slots.forEach(s=>s.value='');
+      UI.err($('#dj-err'),'');
+      $('#sheet-dj').hidden=false;
+      slots[0].focus();
+    });
+    $('#btn-dj-x').addEventListener('click',()=>{ $('#sheet-dj').hidden=true; });
+
+    $('#form-dj').addEventListener('submit', async e=>{
+      e.preventDefault();
+      const pin = slots.map(s=>s.value).join('');
+      if(pin.length<4) return UI.err($('#dj-err'),'Enter all four digits.');
+
+      const local = Rooms.pinFor(state.code);
+      let okPin = local ? pin===local : null;
+      if(okPin===null) okPin = await Cloud.verifyHost(state.code, pin);
+
+      if(okPin===null)
+        return UI.err($('#dj-err'),'This room was created before PIN unlocking was enabled. Use the device that created it.');
+      if(!okPin)
+        return UI.err($('#dj-err'),'That PIN does not match this room.');
+
+      Rooms.claim(state.code, pin);
+      Room.setRole(true);
+      $('#sheet-dj').hidden=true;
+      UI.toast('DJ mode unlocked');
+    });
   },
 
   link(){ return location.origin + location.pathname + '#' + state.code; },
+
+  setRole(isDj){
+    state.dj = !!isDj;
+    document.body.classList.toggle('is-dj', state.dj);
+    $('#role-chip').querySelector('b').textContent = state.dj ? 'DJ' : 'GUEST';
+    const pin = Rooms.pinFor(state.code);
+    if(pin) $('#host-pin').textContent = pin;
+    Room.paintQueue();
+  },
 
   async enter(code){
     state.code = code;
@@ -565,6 +662,7 @@ const Room = {
     $('#room-code').textContent = code;
     $('#song-in').value=''; UI.err($('#song-err'),'');
     $('#invite-qr').innerHTML = QR.svg(Room.link());
+    Room.setRole(Rooms.isHost(code));
 
     // Subscribe before backfilling, or rows inserted in between are lost.
     let loaded=false;
@@ -583,7 +681,8 @@ const Room = {
   },
 
   leave(){
-    state.code=null; state.songs=[]; state.vibes=[];
+    state.code=null; state.songs=[]; state.vibes=[]; state.dj=false;
+    document.body.classList.remove('is-dj');
     Cloud.unsubscribe();
     if(Cam.on) Cam.stop();
     clearInterval(tick); tick=null;
@@ -640,6 +739,17 @@ const Room = {
       const rpc = await sb.rpc('bump_vote', { song_id:id });
       if(rpc.error) await sb.from('songs').update({ votes:song.votes }).eq('id',id);
     }
+  },
+
+  async remove(id){
+    if(!state.dj) return;
+    const song = state.songs.find(s=>s.id===id);
+    if(!song) return;
+    state.songs = state.songs.filter(s=>s.id!==id);
+    Room.paint(); Room.persist();
+    Bus.send({ t:'kill', id });
+    if(sb) await sb.from('songs').delete().eq('id',id);
+    UI.toast('Removed "'+song.title+'"');
   },
 
   async vibe(value, ev){
@@ -761,6 +871,17 @@ const Room = {
       up.addEventListener('click',()=>Room.vote(s.id, up));
 
       li.append(rank, body, up);
+
+      // Pulling a bad request is a DJ job, so the control only exists for them.
+      if(state.dj){
+        const kill=document.createElement('button');
+        kill.type='button'; kill.className='kill';
+        kill.textContent='✕';
+        kill.setAttribute('aria-label','Remove '+s.title+' from the queue');
+        kill.addEventListener('click',()=>Room.remove(s.id));
+        li.appendChild(kill);
+      }
+
       list.appendChild(li);
 
       if(!before.has(s.id)) li.classList.add('row--new');

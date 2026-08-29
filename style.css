@@ -306,6 +306,61 @@ h1,h2,p{ margin:0; }
 .lg__mid.flash{ animation:flash 620ms ease-out; }
 @keyframes flash{ 0%{ color:var(--paper); transform:translateY(-3px) } 100%{ color:var(--dimmer); transform:none } }
 
+/* ------------------------------------------------------------ roles
+   Guests never authenticate. The DJ is one person, so DJ-only controls are
+   gated on a role flag rather than putting a login in front of the crowd. */
+body:not(.is-dj) .dj-only{ display:none !important; }
+body.is-dj .guest-only{ display:none !important; }
+
+.role{
+  display:inline-flex; align-items:center; gap:6px; flex:none;
+  font-family:var(--font-m); font-size:9px; letter-spacing:.16em;
+  padding:6px 10px; border-radius:999px;
+  border:1px solid var(--line); color:var(--dim);
+}
+.role i{ width:5px; height:5px; border-radius:50%; background:var(--fire); animation:ping-r 1.8s ease-out infinite; }
+body.is-dj .role{ border-color:var(--acid); color:var(--acid); }
+body.is-dj .role i{ background:var(--acid); }
+
+.unlock{
+  width:100%; margin-top:10px; padding:12px;
+  font-size:12.5px; color:var(--dimmer);
+  border:1px solid var(--line); border-radius:12px;
+  transition:border-color 160ms, color 160ms;
+}
+.unlock b{ color:var(--paper); font-weight:700; }
+.unlock:hover{ border-color:var(--paper); color:var(--dim); }
+
+.pinbox{
+  margin-top:18px; padding:13px 14px;
+  border:1px dashed rgba(216,255,52,.34); border-radius:12px;
+  background:rgba(216,255,52,.05);
+}
+.pinbox__cap{
+  display:block; font-family:var(--font-m); font-size:9px;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--dimmer);
+}
+.pinbox__row{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:6px; }
+.pinbox__row b{ font-family:var(--font-d); font-size:32px; letter-spacing:.22em; color:var(--acid); }
+.pinbox__row button{
+  font-family:var(--font-m); font-size:10px; letter-spacing:.12em;
+  padding:7px 12px; border:1px solid var(--line); border-radius:8px; color:var(--dim);
+}
+.pinbox__row button:hover{ border-color:var(--acid); color:var(--acid); }
+.pinbox i{ display:block; font-style:normal; font-size:11px; color:var(--dimmer); margin-top:6px; }
+
+.pinform{ margin-top:16px; }
+.pinform__slots{ display:flex; gap:10px; }
+.pinform__slots .slot{ height:64px; font-size:28px; }
+
+/* DJ-only track removal */
+.kill{
+  flex:none; width:30px; height:30px; border-radius:8px;
+  border:1px solid var(--line); color:var(--dimmer); font-size:13px; line-height:1;
+  transition:border-color 150ms, color 150ms, background 150ms;
+}
+.kill:hover{ border-color:var(--fire); color:var(--fire); background:rgba(255,74,33,.1); }
+
 /* ------------------------------------------------------------- join code */
 .bar__share{
   display:inline-flex; align-items:center; gap:7px;

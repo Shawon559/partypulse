@@ -93,16 +93,16 @@
       <span class="bar__code-val" id="room-code">····</span>
     </button>
     <div class="bar__right">
-      <span class="live"><i></i>LIVE</span>
+      <span class="role" id="role-chip"><i></i><b>GUEST</b></span>
       <button class="bar__share" id="btn-share" type="button" aria-label="Show join code">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM19 19h2v2h-2z"/></svg>
-        <span>Join code</span>
+        <span class="bar__share-t">Join code</span>
       </button>
     </div>
   </header>
 
   <!-- Host prompt: the QR is the only way in, so it cannot be a hidden affordance -->
-  <button class="invite" id="btn-invite" type="button">
+  <button class="invite dj-only" id="btn-invite" type="button">
     <span class="invite__qr" id="invite-qr" aria-hidden="true"></span>
     <span class="invite__txt">
       <b>Let people in</b>
@@ -136,7 +136,7 @@
       <span class="lg lg--fire"><b id="count-fire">0</b> fire</span>
     </div>
 
-    <button class="camcta" id="btn-cam" type="button">
+    <button class="camcta dj-only" id="btn-cam" type="button">
       <span class="camcta__ico" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
       </span>
@@ -170,6 +170,11 @@
     </div>
 
     <button class="recap" id="btn-recap" type="button">Copy set recap</button>
+
+    <!-- Guests never log in. This is only for the DJ arriving on a second device. -->
+    <button class="unlock guest-only" id="btn-unlock" type="button">
+      Running this party? <b>Unlock DJ mode</b>
+    </button>
   </section>
 
   <div class="dock-pad" aria-hidden="true"></div>
@@ -199,8 +204,37 @@
     <span class="sheet__cap">Point a camera here</span>
     <div class="qr" id="qr"></div>
     <div class="sheet__code" id="share-code">····</div>
-    <button class="sheet__btn" id="btn-projector" type="button">Open projector view</button>
+    <button class="sheet__btn dj-only" id="btn-projector" type="button">Open projector view</button>
     <button class="sheet__btn sheet__btn--ghost" id="btn-copy-link" type="button">Copy join link</button>
+
+    <div class="pinbox dj-only" id="pinbox">
+      <span class="pinbox__cap">DJ PIN — to control this room from another device</span>
+      <div class="pinbox__row">
+        <b id="host-pin">····</b>
+        <button id="btn-copy-pin" type="button">copy</button>
+      </div>
+      <i>Keep it to yourself. Guests never need it.</i>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ DJ UNLOCK ============================ -->
+<div class="sheet" id="sheet-dj" hidden>
+  <div class="sheet__card" role="dialog" aria-modal="true" aria-label="Unlock DJ mode">
+    <button class="sheet__x" id="btn-dj-x" type="button" aria-label="Close">✕</button>
+    <span class="sheet__cap">Unlock DJ mode</span>
+    <p class="sheet__note">Enter the 4-digit PIN shown when this room was created. Guests never need this — it only moves DJ controls onto this device.</p>
+
+    <form id="form-dj" class="pinform">
+      <div class="pinform__slots" id="pin-slots">
+        <input class="slot" type="text" inputmode="numeric" maxlength="1" aria-label="PIN digit 1" autocomplete="off">
+        <input class="slot" type="text" inputmode="numeric" maxlength="1" aria-label="PIN digit 2" autocomplete="off">
+        <input class="slot" type="text" inputmode="numeric" maxlength="1" aria-label="PIN digit 3" autocomplete="off">
+        <input class="slot" type="text" inputmode="numeric" maxlength="1" aria-label="PIN digit 4" autocomplete="off">
+      </div>
+      <p class="err" id="dj-err" role="alert" hidden></p>
+      <button class="sheet__btn" type="submit">Unlock</button>
+    </form>
   </div>
 </div>
 
@@ -312,6 +346,33 @@ create or replace function bump_vote(song_id uuid)
 returns void language sql as $$
   update songs set votes = votes + 1 where id = song_id;
 $$;
+
+-- DJ mode. The PIN is hashed server-side and the column is never selectable
+-- by clients, so a guest cannot read it back out of the rooms table.
+create extension if not exists pgcrypto;
+alter table rooms add column if not exists host_hash text;
+
+create or replace function create_room(p_code text, p_pin text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  insert into rooms (code, host_hash)
+  values (p_code, encode(digest(p_pin || p_code, 'sha256'), 'hex'))
+  on conflict (code) do nothing;
+end; $$;
+
+create or replace function claim_host(p_code text, p_pin text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare h text;
+begin
+  select host_hash into h from rooms where code = p_code;
+  return h is not null
+     and h = encode(digest(p_pin || p_code, 'sha256'), 'hex');
+end; $$;
+
+revoke select on rooms from anon;
+grant  select (id, code, created_at) on rooms to anon;
+grant  execute on function create_room(text, text) to anon;
+grant  execute on function claim_host(text, text)  to anon;
 
 alter publication supabase_realtime add table rooms, songs, vibes;</code></pre>
     </details>
