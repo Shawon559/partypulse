@@ -262,6 +262,12 @@ create policy "anon all rooms" on rooms for all using (true) with check (true);
 create policy "anon all songs" on songs for all using (true) with check (true);
 create policy "anon all vibes" on vibes for all using (true) with check (true);
 
+-- atomic upvote so simultaneous voters never overwrite each other
+create or replace function bump_vote(song_id uuid)
+returns void language sql as $$
+  update songs set votes = votes + 1 where id = song_id;
+$$;
+
 alter publication supabase_realtime add table rooms, songs, vibes;</code></pre>
     </details>
   </div>
