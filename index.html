@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PartyPulse — Make the Party Better</title>
+  <meta name="description" content="Live party engagement tool. Real-time song requests, live voting, and dynamic vibe checks.">
+  <meta name="theme-color" content="#0d0c1d">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <div class="app-container">
+    <!-- LANDING VIEW -->
+    <main id="view-landing" class="view view-active">
+      <div class="landing-card card">
+        <header class="brand-header">
+          <div class="logo-badge">
+            <span class="logo-icon">✨</span>
+            <span class="logo-sparkle"></span>
+          </div>
+          <h1 class="brand-title">PartyPulse</h1>
+          <p class="brand-tagline">Make the Party Better</p>
+        </header>
+
+        <section class="action-section">
+          <button id="btn-create-room" class="btn btn-primary btn-block btn-lg" type="button">
+            <span class="btn-icon">⚡</span>
+            <span class="btn-text">Create Room</span>
+            <span class="btn-spinner hidden" aria-hidden="true"></span>
+          </button>
+
+          <div class="divider">
+            <span>or join a party</span>
+          </div>
+
+          <form id="form-join-room" class="join-form" novalidate>
+            <div class="input-group">
+              <label for="input-room-code" class="sr-only">Enter 4-Letter Room Code</label>
+              <input 
+                type="text" 
+                id="input-room-code" 
+                class="input input-room-code" 
+                placeholder="ROOM CODE (e.g. VIBE)" 
+                maxlength="4" 
+                autocomplete="off" 
+                autocorrect="off" 
+                autocapitalize="characters" 
+                spellcheck="false"
+              >
+              <button id="btn-join-room" class="btn btn-secondary" type="submit">
+                <span class="btn-text">Join</span>
+              </button>
+            </div>
+            <div id="join-error-msg" class="error-banner hidden" role="alert"></div>
+          </form>
+        </section>
+
+        <!-- Recent Rooms Section -->
+        <section id="recent-rooms-section" class="recent-rooms-section hidden">
+          <h2 class="section-subtitle">Your Active Parties</h2>
+          <div id="recent-rooms-list" class="recent-rooms-list"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- ROOM VIEW -->
+    <main id="view-room" class="view hidden">
+      <!-- Header with Room Info -->
+      <header class="room-header card-glass">
+        <div class="room-header-left">
+          <button id="btn-leave-room" class="btn-icon-only" type="button" title="Back to Home" aria-label="Leave room">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+          </button>
+          <div class="room-brand">
+            <span class="brand-name">PartyPulse</span>
+            <span class="live-indicator">
+              <span class="live-dot"></span> LIVE
+            </span>
+          </div>
+        </div>
+
+        <div class="room-header-right">
+          <button id="btn-copy-code" class="room-code-badge" type="button" title="Click to copy room code" aria-label="Room code">
+            <span class="code-label">ROOM</span>
+            <span id="display-room-code" class="code-value">----</span>
+            <span class="copy-icon" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </span>
+          </button>
+        </div>
+      </header>
+
+      <!-- VIBE CHECK SECTION -->
+      <section class="vibe-section card" aria-label="Vibe Check">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="title-icon">🌡️</span> Vibe Check
+          </h2>
+          <span class="vibe-window-badge">Last 5 min</span>
+        </div>
+
+        <!-- Dynamic Vibe Ratio Bar -->
+        <div class="vibe-meter-container">
+          <div class="vibe-counts-row">
+            <span class="vibe-stat vibe-stat-fire">
+              <span class="emoji">🔥</span> <strong id="count-fire">0</strong>
+            </span>
+            <span id="vibe-status-text" class="vibe-status-text">Party warming up...</span>
+            <span class="vibe-stat vibe-stat-sleepy">
+              <strong id="count-sleepy">0</strong> <span class="emoji">😴</span>
+            </span>
+          </div>
+
+          <div class="vibe-bar-track">
+            <div id="vibe-bar-fill" class="vibe-bar-fill" style="width: 50%;"></div>
+            <div class="vibe-bar-center-marker"></div>
+          </div>
+        </div>
+
+        <!-- Large Interactive Tap Buttons -->
+        <div class="vibe-actions">
+          <button id="btn-vibe-fire" class="btn-vibe btn-vibe-fire" type="button" aria-label="Fire vibe">
+            <span class="vibe-btn-emoji">🔥</span>
+            <span class="vibe-btn-label">Fire</span>
+            <span class="vibe-btn-sub">Hyped up!</span>
+          </button>
+          <button id="btn-vibe-sleepy" class="btn-vibe btn-vibe-sleepy" type="button" aria-label="Sleepy vibe">
+            <span class="vibe-btn-emoji">😴</span>
+            <span class="vibe-btn-label">Sleepy</span>
+            <span class="vibe-btn-sub">Need a boost</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- SONG QUEUE SECTION -->
+      <section class="queue-section card" aria-label="Live Song Queue">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="title-icon">🎵</span> Song Queue
+          </h2>
+          <span id="song-count-badge" class="badge">0 tracks</span>
+        </div>
+
+        <!-- Add Song Form -->
+        <form id="form-add-song" class="add-song-form" novalidate>
+          <div class="song-input-wrapper">
+            <input 
+              type="text" 
+              id="input-song-title" 
+              class="input input-song" 
+              placeholder="Suggest a song or artist..." 
+              maxlength="100" 
+              autocomplete="off" 
+              spellcheck="false"
+            >
+            <button id="btn-add-song" class="btn btn-primary btn-add-song" type="submit">
+              <span>Add</span>
+            </button>
+          </div>
+          <div id="song-error-msg" class="error-banner hidden" role="alert"></div>
+        </form>
+
+        <!-- Song List -->
+        <div id="song-list-container" class="song-list-container">
+          <!-- Empty State -->
+          <div id="queue-empty-state" class="empty-state">
+            <div class="empty-icon">🎶</div>
+            <h3 class="empty-title">Queue is empty</h3>
+            <p class="empty-desc">Be the party hero! Suggest the first track to get the crowd dancing.</p>
+          </div>
+
+          <!-- Active Song List -->
+          <ul id="song-list" class="song-list hidden" role="list"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
