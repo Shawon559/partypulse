@@ -81,3 +81,7 @@ Verified by an automated Playwright suite (2 real browser tabs, 375×812).
   screenshots. 66/66 green locally and against production.
 
 STATUS: DONE
+- **19** — Spec compliance: the brief allowed Supabase as the only external
+  dependency, but the page also linked Google Fonts. The three faces (latin subset,
+  52 KB raw) are now embedded as base64 in `style.css`, so the only third-party host
+  contacted is the Supabase CDN. Verified by recording every network request.

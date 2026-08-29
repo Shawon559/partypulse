@@ -9,7 +9,9 @@ how the room feels. A rolling five-minute energy meter turns those taps into one
 the person running the music can act on mid-set.
 
 Built with plain HTML, CSS and JavaScript. No framework, no build step.
-Supabase provides realtime sync; there are no other dependencies.
+Supabase provides realtime sync and is the only external dependency — webfonts are
+embedded in the stylesheet rather than linked, so the page contacts exactly one
+third-party host.
 
 ---
 
