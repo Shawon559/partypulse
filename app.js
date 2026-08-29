@@ -589,6 +589,7 @@ const Room = {
     $('#btn-proj-x').addEventListener('click', Projector.close);
     $('#btn-share-x').addEventListener('click',()=>{ $('#sheet-share').hidden=true; });
     $('#btn-copy-link').addEventListener('click',()=>UI.copy(Room.link(),'Join link copied'));
+    $('#btn-copy-tv').addEventListener('click',()=>UI.copy(Room.tvLink(),'Projector link copied — open it on the big screen'));
 
     $('#form-song').addEventListener('submit',e=>{ e.preventDefault(); Room.addSong(); });
     $('#song-in').addEventListener('input',()=>UI.err($('#song-err'),''));
@@ -646,6 +647,10 @@ const Room = {
   },
 
   link(){ return location.origin + location.pathname + '#' + state.code; },
+
+  /* Display-only, so it carries no DJ rights — it just opens the big screen.
+     Lets the DJ run the room from a phone and the projector from a laptop. */
+  tvLink(){ return location.origin + location.pathname + '?tv=1#' + state.code; },
 
   setRole(isDj){
     state.dj = !!isDj;
@@ -1156,7 +1161,8 @@ const Router = {
     if(inRoom){
       $('#screen-entry').hidden=true;  $('#screen-entry').classList.remove('screen--on');
       $('#screen-room').hidden=false;  $('#screen-room').classList.add('screen--on');
-      Room.enter(code);
+      const tv = new URLSearchParams(location.search).has('tv');
+      Room.enter(code).then(()=>{ if(tv) Projector.open(); });
     } else {
       Room.leave();
       $('#screen-room').hidden=true;   $('#screen-room').classList.remove('screen--on');
