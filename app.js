@@ -6,10 +6,12 @@
 'use strict';
 
 /* --------------------------------------------------------------- 0. config */
-/* Paste credentials here to bake them in, or enter them via the LOCAL chip
-   in the top-left of the entry screen (stored per-browser). */
-const SUPABASE_URL      = '';
-const SUPABASE_ANON_KEY = '';
+/* The anon key is a public client credential by design: it carries no privileges
+   beyond the row-level security policies in the schema. Guests have no accounts,
+   so this is the intended way to ship it. Override either value per-browser via
+   the LOCAL chip on the entry screen. */
+const SUPABASE_URL      = 'https://jbmcjkvrjtxfinqkoega.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpibWNqa3ZyanR4ZmlucWtvZWdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5NzE2MDYsImV4cCI6MjEwMzU0NzYwNn0.kS4rhzqgKahtSB79JXadGpJFJE5oFYNtVNkZiU6gqes';
 
 const K = {
   url:'pp.url', key:'pp.key', rooms:'pp.rooms', recent:'pp.recent',
@@ -274,6 +276,8 @@ const Cloud = {
 
   async createRoom(code){ if(sb) await sb.from('rooms').insert({ code }); },
 
+  /* Backfill history. Merges rather than replaces: the channel is already live
+     by the time this runs, so an event can land mid-request and must survive. */
   async load(code){
     if(!sb) return false;
     const since = new Date(Date.now()-WINDOW_MS).toISOString();
@@ -282,15 +286,32 @@ const Cloud = {
       sb.from('vibes').select('*').eq('room_code',code).gte('created_at',since)
     ]);
     if(s.error||v.error) return false;
-    state.songs = (s.data||[]).map(Song.fromRow);
-    state.vibes = (v.data||[]).map(Vibe.fromRow);
+
+    const songById = new Map(state.songs.map(x=>[x.id,x]));
+    (s.data||[]).map(Song.fromRow).forEach(x=>songById.set(x.id,x));
+    state.songs = Array.from(songById.values());
+
+    const vibeById = new Map(state.vibes.map(x=>[x.id,x]));
+    (v.data||[]).map(Vibe.fromRow).forEach(x=>vibeById.set(x.id,x));
+    state.vibes = Array.from(vibeById.values());
     return true;
   },
 
-  /* Realtime: push-based. Rows arrive as events, never polled. */
+  /* Realtime: push-based. Rows arrive as events, never polled.
+     Resolves once the channel is actually SUBSCRIBED, so the caller can
+     backfill afterwards without a gap where inserts are dropped. */
   subscribe(code){
-    if(!sb) return;
+    if(!sb) return Promise.resolve();
     Cloud.unsubscribe();
+    return new Promise(resolve=>{
+      let settled=false;
+      const done=()=>{ if(!settled){ settled=true; resolve(); } };
+      setTimeout(done, 5000);   // never block the room on a slow socket
+      Cloud._open(code, done);
+    });
+  },
+
+  _open(code, onReady){
     chan = sb.channel('room:'+code)
       .on('postgres_changes',
           { event:'INSERT', schema:'public', table:'songs', filter:'room_code=eq.'+code },
@@ -304,7 +325,7 @@ const Cloud = {
       .on('postgres_changes',
           { event:'INSERT', schema:'public', table:'vibes', filter:'room_code=eq.'+code },
           p => { Room.mergeVibe(Vibe.fromRow(p.new)); })
-      .subscribe();
+      .subscribe(status=>{ if(status==='SUBSCRIBED') onReady(); });
   },
 
   unsubscribe(){ if(sb && chan){ sb.removeChannel(chan); chan=null; } }
@@ -536,8 +557,12 @@ const Room = {
     $('#room-code').textContent = code;
     $('#song-in').value=''; UI.err($('#song-err'),'');
 
+    // Subscribe before backfilling, or rows inserted in between are lost.
     let loaded=false;
-    if(sb){ try{ loaded = await Cloud.load(code); }catch(e){} Cloud.subscribe(code); }
+    if(sb){
+      await Cloud.subscribe(code);
+      try{ loaded = await Cloud.load(code); }catch(e){}
+    }
     if(!loaded){
       state.songs = ls.get(K.songs(code),[]);
       state.vibes = ls.get(K.vibes(code),[]);

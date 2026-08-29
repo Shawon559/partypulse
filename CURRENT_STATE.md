@@ -42,3 +42,12 @@ Verified by an automated Playwright suite (2 real browser tabs, 375×812).
 - **08** — Extended the suite to the criteria the first pass missed: five-minute
   window aging, recap ranking, camera-denial degradation, missing
   `BroadcastChannel`, and reduced-motion. 20/20 green across both suites.
+- **09** — Connected Supabase. Found a real ordering bug: `enter()` backfilled
+  history *then* subscribed, so rows inserted in that gap were lost forever — a
+  guest joining just before the host queued a track never saw it. Now subscribes
+  and waits for `SUBSCRIBED` before backfilling, and the backfill merges instead
+  of replacing so an event landing mid-request survives. Cross-device suite went
+  5/6 → 6/6 against two isolated browser contexts (no shared storage, so anything
+  that syncs proves it travelled through Supabase).
+- **10** — Deployed to GitHub Pages. Full suite re-run against the live URL, and
+  the production QR verified to decode back to the live room link.
