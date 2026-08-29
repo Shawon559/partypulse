@@ -34,3 +34,11 @@ Verified by an automated Playwright suite (2 real browser tabs, 375×812).
 - **05** — Layout fixes: footer container background bled through its top padding
   as a grey band; toasts covered the room code. Footer is now a hairline list,
   toasts moved above the dock.
+- **06** — Added Pulse Cam: on-device frame differencing (64x48 luma) for crowd
+  motion, peak-spacing BPM estimate, and rate-limited auto-feeding of the energy
+  meter. Verified against Chromium's synthetic camera. Added tap combo streak.
+- **07** — Added `PRD.md` with a testable `Done when:` line per task, and
+  `README.md` carrying the GTM and business case.
+- **08** — Extended the suite to the criteria the first pass missed: five-minute
+  window aging, recap ranking, camera-denial degradation, missing
+  `BroadcastChannel`, and reduced-motion. 20/20 green across both suites.

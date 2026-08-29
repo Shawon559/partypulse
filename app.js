@@ -747,8 +747,9 @@ const Room = {
 
     let out='PartyPulse — room '+state.code+'\n';
     out+='Energy: '+(fire+sleepy ? Math.round(fire/(fire+sleepy)*100) : 50)+'% ('+fire+' fire / '+sleepy+' sleepy)\n\n';
-    out+= songs.length ? songs.map((s,i)=>(i+1)+'. '+s.title+' — '+s.votes+' votes').join('\n')
-                       : 'No tracks requested.';
+    out+= songs.length
+      ? songs.map((s,i)=>(i+1)+'. '+s.title+' — '+s.votes+(s.votes===1?' vote':' votes')).join('\n')
+      : 'No tracks requested.';
     UI.copy(out,'Set recap copied');
   }
 };
