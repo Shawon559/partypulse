@@ -347,32 +347,34 @@ returns void language sql as $$
   update songs set votes = votes + 1 where id = song_id;
 $$;
 
--- DJ mode. The PIN is hashed server-side and the column is never selectable
--- by clients, so a guest cannot read it back out of the rooms table.
-create extension if not exists pgcrypto;
+-- DJ mode. The real control is the column grant below: host_hash is simply not
+-- selectable by the anon role, so a guest can only ask the server whether a PIN
+-- is right, never read it. md5 is defence-in-depth if that column ever leaks —
+-- a 4-digit PIN is brute-forceable under any hash, so it is not the control.
 alter table rooms add column if not exists host_hash text;
 
-create or replace function create_room(p_code text, p_pin text)
+create or replace function public.create_room(p_code text, p_pin text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  insert into rooms (code, host_hash)
-  values (p_code, encode(digest(p_pin || p_code, 'sha256'), 'hex'))
+  insert into public.rooms (code, host_hash)
+  values (p_code, md5(p_pin || p_code))
   on conflict (code) do nothing;
 end; $$;
 
-create or replace function claim_host(p_code text, p_pin text)
+create or replace function public.claim_host(p_code text, p_pin text)
 returns boolean language plpgsql security definer set search_path = public as $$
 declare h text;
 begin
-  select host_hash into h from rooms where code = p_code;
-  return h is not null
-     and h = encode(digest(p_pin || p_code, 'sha256'), 'hex');
+  select host_hash into h from public.rooms where code = p_code;
+  return h is not null and h = md5(p_pin || p_code);
 end; $$;
 
 revoke select on rooms from anon;
 grant  select (id, code, created_at) on rooms to anon;
-grant  execute on function create_room(text, text) to anon;
-grant  execute on function claim_host(text, text)  to anon;
+grant  execute on function public.create_room(text, text) to anon;
+grant  execute on function public.claim_host(text, text)  to anon;
+
+notify pgrst, 'reload schema';
 
 alter publication supabase_realtime add table rooms, songs, vibes;</code></pre>
     </details>

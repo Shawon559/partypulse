@@ -62,3 +62,15 @@ Verified by an automated Playwright suite (2 real browser tabs, 375×812).
 - **12** — Energy ramp rerouted the long way round the hue wheel
   (blue -> violet -> magenta -> red) so the neutral midpoint no longer lands on a
   green that fought the acid accent. 37/37 tests green across four suites.
+- **13** — Split DJ and guest roles. Creator is DJ on that device with no login;
+  a 4-digit PIN (hashed server-side, column revoked from the anon grant) moves DJ
+  mode to a second device. DJ-only: Pulse Cam, projector, invite prompt, track
+  removal. Guests keep queue, voting, vibe taps and the energy meter.
+- **14** — Bug: track removal never reached other devices. Postgres sends only the
+  primary key on DELETE under the default replica identity, so the `room_code`
+  filter could never match and the event was dropped. Now unfiltered, matched by id.
+- **15** — Bug: role CSS was scoped to the room screen, but the share sheet sits
+  outside it, so guests still saw DJ controls inside the modal. Scoped to `body`.
+- **16** — Verified the PIN column is genuinely unreadable: `select=code` succeeds
+  while `select=*` and `select=host_hash` are both denied for the anon role.
+  57/57 tests green across five suites.
